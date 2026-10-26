@@ -1,0 +1,45 @@
+#!/bin/sh /etc/rc.common
+# our-free-model 独立本地服务 · procd 守护
+# 数据目录：/usr/lib/ofm-data（UCI 可改）
+# 服务端口：18900（UCI 可改），管理页经 SSH 隧道访问 127.0.0.1:18900
+
+USE_PROCD=1
+START=99
+STOP=15
+
+OFM_DATA_DEFAULT="/usr/lib/ofm-data"
+OFM_HOME_DIR="$OFM_DATA_DEFAULT"
+OFM_PORT="18900"
+
+ofm_read_uci() {
+  config_load openwrt-ofm 2>/dev/null || true
+  local d p
+  d=$(uci -q get openwrt-ofm.@ofm[0].data_dir 2>/dev/null) && OFM_HOME_DIR="$d"
+  p=$(uci -q get openwrt-ofm.@ofm[0].port 2>/dev/null) && OFM_PORT="$p"
+}
+
+start_service() {
+  ofm_read_uci
+  mkdir -p "$OFM_HOME_DIR"
+
+  procd_open_instance
+  procd_set_param command /usr/bin/node /usr/lib/ofm/packages/standalone/cli.mjs \
+    --port "$OFM_PORT" --data-dir "$OFM_HOME_DIR"
+  # 使用上游默认策略，不额外开启模型探测。
+  procd_set_param env OFM_HOME="$OFM_HOME_DIR"
+  procd_set_param stdout 1
+  procd_set_param stderr 1
+  procd_set_param respawn 60 10 0
+  procd_close_instance
+}
+
+stop_service() {
+  ofm_read_uci
+  rm -f "$OFM_HOME_DIR/service.lock" 2>/dev/null || true
+}
+
+status() {
+  ofm_read_uci
+  echo "dsh-our-free-model-for-openwrt: port $OFM_PORT, data dir $OFM_HOME_DIR"
+  curl -s "http://127.0.0.1:$OFM_PORT/health" 2>/dev/null || echo "(health endpoint unreachable)"
+}

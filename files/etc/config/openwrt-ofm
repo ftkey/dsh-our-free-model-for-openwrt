@@ -1,0 +1,3 @@
+config ofm 'main'
+	option port '18900'
+	option data_dir '/usr/lib/ofm-data'

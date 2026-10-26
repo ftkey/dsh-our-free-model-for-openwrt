@@ -1,0 +1,8 @@
+/dist/
+/sdk/
+/.cache/
+__pycache__/
+*.pyc
+.DS_Store
+/.upstream/
+/.payload-*/
