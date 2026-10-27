@@ -4,9 +4,9 @@
 
 仓库地址：[ftkey/dsh-our-free-model-for-openwrt](https://github.com/ftkey/dsh-our-free-model-for-openwrt)。软件包名和 APK 文件名前缀统一为 `dsh-our-free-model-for-openwrt`。这是安装到现有 ROM 的软件包，不会生成或重命名整个路由器固件镜像。
 
-## GitHub Actions 编译 APK
+## GitHub Actions 编译 APK / IPK
 
-参考 [VIKINGYFY/packages 的 APK 工作流](https://github.com/VIKINGYFY/packages/blob/main/.github/workflows/Build-APK-Packages.yml)，使用 ImmortalWrt snapshot SDK 的 `BuildPackage` 生成正式 APK，并通过 SDK 的 `apk adbdump` 读取元数据、核对包名。下载 SDK 时检查 SHA256；SDK 提供签名公钥时验证 APK 签名。
+使用 ImmortalWrt snapshot SDK 的同一套 `BuildPackage` 配方生成 APK 或 IPK，通过 `CONFIG_USE_APK` 切换格式。APK 使用 SDK 的 `apk adbdump` 核对元数据；IPK 检查控制信息、运行时和 LuCI 安装内容。下载 SDK 时检查 SHA256，SDK 提供签名公钥时验证 APK 签名。
 
 默认同时构建：
 
@@ -18,11 +18,12 @@
 ARM64 目标依据 [ER1-WRT-CI 的 ROM 配置](https://github.com/ftkey/ER1-WRT-CI/blob/main/.github/workflows/build-firmware.yml) 选择。ROM 使用 VIKINGYFY/immortalwrt，而此处和参考项目一样使用官方 ImmortalWrt snapshot SDK；两者并非同一构建，安装时仍需核对设备架构、APK 格式和 Node.js 版本。
 
 1. 将**本目录内容**放在新仓库根目录，确保包含隐藏的 `.github/`、根 `Makefile`、`files/` 和 `payload/`。不要将整个项目目录嵌套一层上传，也不要上传 `dist/`。
-2. 推送到 `main` 后先自测，再编译当前已提交快照；也可在 **Actions → Build APK → Run workflow** 手动运行（默认不勾选 `sync_upstream`）。PR 和版本标签同样只构建对应提交。定时运行或手动明确勾选 `sync_upstream` 才同步上游。
-3. 编译完成后下载 Artifacts 中对应平台的 ZIP。每个平台包含 APK、`SHA256SUMS`、`APK-METADATA.txt`、`SDK.config`、SDK 下载校验列表、移植版本信息及源提交 SHA。
-4. 需要发布到 Releases 时，手动运行时勾选 `publish`，或推送 `v*` 标签。普通分支推送只上传 Artifact。无需配置额外 Secret，发布使用仓库内置 `GITHUB_TOKEN`。
+2. 推送到 `main` 后先自测，再编译当前已提交快照；也可在 **Actions → Build APK / IPK → Run workflow** 手动运行（默认不勾选 `sync_upstream`）。PR 和版本标签同样只构建对应提交。定时运行或手动明确勾选 `sync_upstream` 才同步上游。
+3. 手动运行时选择「打包格式」：`apk` 或 `ipk`，默认 `apk`。普通推送、定时和标签构建默认使用 APK。
+4. 编译完成后下载 Artifacts 中对应格式、平台的 ZIP，如 `dsh-our-free-model-for-openwrt-ipk-arm64-ipq60xx`。每个平台包含所选格式的软件包、`SHA256SUMS`、对应的元数据文件、`PACKAGE-FORMAT`、`SDK.config`、SDK 下载校验列表、移植版本信息及源提交 SHA。
+5. 需要发布到 Releases 时，手动运行时勾选 `publish`，或推送 `v*` 标签。普通分支推送只上传 Artifact。无需配置额外 Secret，发布使用仓库内置 `GITHUB_TOKEN`。
 
-APK 使用 SDK 的文件命名规则，例如 `dsh-our-free-model-for-openwrt-2.7.2-r4.apk`，实际版本以 Artifact 为准。载荷是纯 JS，配方使用 `PKGARCH:=all`；仍分别使用两个平台 SDK 处理依赖和验证，产物按平台分开保存。不会打包 Node.js，需要从固件软件源安装。
+软件包使用 SDK 命名规则，例如 `dsh-our-free-model-for-openwrt-2.7.2-r4.apk` 或 `dsh-our-free-model-for-openwrt_2.7.2-r4_all.ipk`，实际版本以 Artifact 为准。载荷是纯 JS，配方使用 `PKGARCH:=all`；仍分别使用两个平台 SDK 处理依赖和验证，产物按平台分开保存。不会打包 Node.js，需要从固件软件源安装。
 
 ## 自动同步上游
 
@@ -65,6 +66,15 @@ apk add --allow-untrusted ./dsh-our-free-model-for-openwrt-2.7.2-r4.apk
 /etc/init.d/ourfreemodel status
 logread -e ourfreemodel
 ```
+
+APK 用于采用 `apk` 的固件；IPK 用于采用 `opkg` 的固件。IPK 安装示例：
+
+```sh
+opkg update
+opkg install ./dsh-our-free-model-for-openwrt_2.7.2-r4_all.ipk
+```
+
+选择 IPK 不会降低运行时要求，仍需要 Node.js 22.19+ 或 24+。部分旧版固件软件源只有 Node.js 20，必须先解决匹配的 Node 依赖；snapshot SDK 生成的 IPK 也需要与目标固件的依赖 ABI 匹配。
 
 这是独立 SDK 构建的第三方 APK，ROM 默认不信任其签名，因此安装时使用 `--allow-untrusted`。依赖无法满足时先核对 ROM 软件源；不要强制跳过 Node.js 依赖。旧 `mkapk.py` 手工生成的 `dist/*.apk` 不属于 SDK 产物，请重新通过 Actions 编译；该入口现已停用。
 
@@ -125,7 +135,9 @@ uci commit ourfreemodel
 ```text
 .github/workflows/Build-APK.yml  定时同步、编译与可选发布
 Makefile                       OpenWrt 软件包配方
-scripts/build-apk.sh            SDK 编译、元数据检查及产物收集
+scripts/build-package.sh        APK/IPK SDK 编译、格式校验及产物收集
+scripts/build-apk.sh            保留原 APK 构建命令
+scripts/inspect-ipk.py          IPK 控制信息与安装内容校验
 scripts/sync-upstream.sh        检测上游提交、刷新载荷及更新发布号
 build-payload.sh               从上游工作树刷新运行时快照
 payload/                       随仓库提交的运行时及预编译 Web UI
@@ -159,10 +171,12 @@ cd /path/to/sdk
 ./scripts/feeds update -a
 ./scripts/feeds install -a
 cd /path/to/dsh-our-free-model-for-openwrt
-bash scripts/build-apk.sh /path/to/sdk ./dist qualcommax ipq60xx
+bash scripts/build-package.sh /path/to/sdk ./dist qualcommax ipq60xx apk
+# 同一 SDK 生成 IPK：
+bash scripts/build-package.sh /path/to/sdk ./dist qualcommax ipq60xx ipk
 ```
 
-也可把根 `Makefile`、`files/`、`payload/` 复制到 ROM 源码的 `package/dsh-our-free-model-for-openwrt/`，在 ROM 配置中启用 `CONFIG_PACKAGE_dsh-our-free-model-for-openwrt=y`。旧 `make-ipk.sh` / `mkar.py` 仅保留为历史 opkg 工具，不参与 APK 工作流。
+也可把根 `Makefile`、`files/`、`payload/` 复制到 ROM 源码的 `package/dsh-our-free-model-for-openwrt/`，在 ROM 配置中启用 `CONFIG_PACKAGE_dsh-our-free-model-for-openwrt=y`。`make-ipk.sh <SDK目录> <输出目录> <target> <subtarget>` 现在也转到同一 SDK 配方，不再手工拼装安装包。
 
 自测命令：
 

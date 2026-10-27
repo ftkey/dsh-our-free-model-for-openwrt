@@ -1,5 +1,5 @@
-name: Build APK
-run-name: 编译 dsh-our-free-model-for-openwrt APK
+name: Build APK / IPK
+run-name: 编译 dsh-our-free-model-for-openwrt / ${{ inputs.package_format || 'apk' }}
 
 on:
   schedule:
@@ -12,6 +12,13 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
+      package_format:
+        description: 打包格式
+        type: choice
+        default: apk
+        options:
+          - apk
+          - ipk
       sync_upstream:
         description: 同步 Ebony-Vinyl/dsh-our-free-model 最新默认分支后编译（仅 main）
         type: boolean
@@ -126,7 +133,7 @@ jobs:
             completed_runs="$(gh api --method GET \
               "repos/$GITHUB_REPOSITORY/actions/workflows/Build-APK.yml/runs" \
               -f branch=main -f head_sha="$source_sha" -f status=completed -f per_page=100)"
-            if jq -e '.workflow_runs | any(.conclusion == "success")' <<< "$completed_runs" >/dev/null; then
+            if jq -e '.workflow_runs | any(.conclusion == "success" and (.display_title | endswith("/ apk")))' <<< "$completed_runs" >/dev/null; then
               should_build=false
             fi
           fi
@@ -135,7 +142,7 @@ jobs:
           echo "编译提交：$source_sha；需要编译：$should_build" >> "$GITHUB_STEP_SUMMARY"
 
   build:
-    name: APK / ${{ matrix.platform }}
+    name: ${{ inputs.package_format || 'apk' }} / ${{ matrix.platform }}
     needs: [prepare, test-access]
     if: needs.prepare.outputs.should_build == 'true'
     runs-on: ubuntu-24.04
@@ -154,6 +161,7 @@ jobs:
             subtarget: '64'
             sdk_prefix: immortalwrt-sdk-x86-64_
     env:
+      PACKAGE_FORMAT: ${{ inputs.package_format || 'apk' }}
       SDK_BASE_URL: https://downloads.immortalwrt.org/snapshots/targets/${{ matrix.target }}/${{ matrix.subtarget }}
       SDK_ARCHIVE_PREFIX: ${{ matrix.sdk_prefix }}
     steps:
@@ -218,23 +226,23 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: 编译并校验 APK
+      - name: 编译并校验软件包
         env:
           SDK_TARGET: ${{ matrix.target }}
           SDK_SUBTARGET: ${{ matrix.subtarget }}
           SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
         run: |
-          bash scripts/build-apk.sh "$SDK_ROOT" "$RUNNER_TEMP/apk-output" "$SDK_TARGET" "$SDK_SUBTARGET"
-          cp "$RUNNER_TEMP/SDK-SHA256SUMS" "$RUNNER_TEMP/apk-output/"
-          printf '%s\n' "$SOURCE_SHA" > "$RUNNER_TEMP/apk-output/SOURCE-SHA"
-          echo '### APK 编译结果' >> "$GITHUB_STEP_SUMMARY"
-          cat "$RUNNER_TEMP/apk-output/SHA256SUMS" >> "$GITHUB_STEP_SUMMARY"
+          bash scripts/build-package.sh "$SDK_ROOT" "$RUNNER_TEMP/package-output" "$SDK_TARGET" "$SDK_SUBTARGET" "$PACKAGE_FORMAT"
+          cp "$RUNNER_TEMP/SDK-SHA256SUMS" "$RUNNER_TEMP/package-output/"
+          printf '%s\n' "$SOURCE_SHA" > "$RUNNER_TEMP/package-output/SOURCE-SHA"
+          echo "### $PACKAGE_FORMAT 编译结果" >> "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/package-output/SHA256SUMS" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: 上传 APK 和构建信息
+      - name: 上传软件包和构建信息
         uses: actions/upload-artifact@v4
         with:
-          name: dsh-our-free-model-for-openwrt-${{ matrix.platform }}
-          path: ${{ runner.temp }}/apk-output/
+          name: dsh-our-free-model-for-openwrt-${{ env.PACKAGE_FORMAT }}-${{ matrix.platform }}
+          path: ${{ runner.temp }}/package-output/
           if-no-files-found: error
           retention-days: 30
 
@@ -242,22 +250,24 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: build-logs-${{ matrix.platform }}
+          name: build-logs-${{ env.PACKAGE_FORMAT }}-${{ matrix.platform }}
           path: ${{ env.SDK_ROOT }}/logs/
           if-no-files-found: ignore
 
   publish:
-    name: 发布 APK
+    name: 发布软件包
     needs: [prepare, build]
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+    env:
+      PACKAGE_FORMAT: ${{ inputs.package_format || 'apk' }}
     steps:
       - name: 下载全部编译产物
         uses: actions/download-artifact@v4
         with:
-          pattern: dsh-our-free-model-for-openwrt-*
+          pattern: dsh-our-free-model-for-openwrt-${{ env.PACKAGE_FORMAT }}-*
           path: output
 
       - name: 发布到 Releases
@@ -265,7 +275,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
         run: |
-          tag="apk-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+          tag="${PACKAGE_FORMAT}-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             tag="$GITHUB_REF_NAME"
           fi
@@ -276,11 +286,11 @@ jobs:
             assets+=("$GITHUB_WORKSPACE/$platform.zip")
           done
           cat > "$RUNNER_TEMP/notes.md" <<NOTES
-          dsh-our-free-model-for-openwrt APK（ImmortalWrt snapshot SDK）
+          dsh-our-free-model-for-openwrt $PACKAGE_FORMAT（ImmortalWrt snapshot SDK）
 
           arm64-ipq60xx：太乙 ER1 / qualcommax-ipq60xx；amd64：x86/64。
-          每个 ZIP 含 APK、SHA256SUMS、SDK 配置、SDK 校验列表及源提交信息。
-          需要固件源提供 Node.js 22.19+ 或 24+；第三方 APK 安装时使用 --allow-untrusted。
+          每个 ZIP 含所选格式的软件包、SHA256SUMS、SDK 配置、SDK 校验列表及源提交信息。
+          需要固件源提供 Node.js 22.19+ 或 24+。APK 使用 apk 安装；IPK 使用 opkg 安装。
           snapshot SDK 与自定义 ROM 的依赖版本可能不同，请以设备上的依赖检查为准。
 
           源提交：$SOURCE_SHA
