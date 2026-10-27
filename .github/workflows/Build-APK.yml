@@ -15,7 +15,7 @@ on:
       sync_upstream:
         description: 同步 Ebony-Vinyl/dsh-our-free-model 最新默认分支后编译（仅 main）
         type: boolean
-        default: true
+        default: false
       publish:
         description: 编译成功后发布到 GitHub Releases
         type: boolean
@@ -39,6 +39,11 @@ jobs:
         with:
           node-version: '24'
       - run: node --test tests/*.test.mjs
+      - name: 验证安装后启动及密码重载
+        run: |
+          docker run --rm --network none -e OFM_CONTAINER_SMOKE=1 \
+            --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/work,readonly" \
+            -w /work node:24-bookworm node scripts/test-installed-runtime.mjs
 
   prepare:
     name: 检查并同步上游
@@ -64,8 +69,9 @@ jobs:
           SYNC_REQUESTED: ${{ inputs.sync_upstream }}
         run: |
           enabled=false
-          if [[ "$GITHUB_REF" == refs/heads/main && "$EVENT_NAME" != pull_request ]]; then
-            if [[ "$EVENT_NAME" != workflow_dispatch || "$SYNC_REQUESTED" == true ]]; then
+          # 普通推送只构建已提交的快照；同步仅由定时或明确的手动请求触发。
+          if [[ "$GITHUB_REF" == refs/heads/main ]]; then
+            if [[ "$EVENT_NAME" == schedule || ( "$EVENT_NAME" == workflow_dispatch && "$SYNC_REQUESTED" == true ) ]]; then
               enabled=true
             fi
           fi
@@ -133,7 +139,8 @@ jobs:
     needs: [prepare, test-access]
     if: needs.prepare.outputs.should_build == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    # Node.js 依赖的首次构建曾接近 3 小时，给新增 LuCI 依赖预留时间。
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:

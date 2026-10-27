@@ -4,11 +4,48 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
 import { spawn } from 'node:child_process'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { resolveBinding, parsePort, httpAddress } from '../files/usr/lib/ofm-access/bind.mjs'
 import { createControl } from '../files/usr/lib/ofm-access/control.mjs'
 import { loadCredential, verifyPassword } from '../files/usr/lib/ofm-access/password.mjs'
 
 const root = new URL('../', import.meta.url)
+const execute = promisify(execFile)
+
+test('真实 init 脚本向 procd 传递双端口和接口，禁用时不启动，注册配置及接口触发器', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ofm-init-'))
+  t.after(() => fs.rm(dir, { recursive: true, force: true }))
+  const harness = path.join(dir, 'harness.sh')
+  await fs.writeFile(harness, `config_load() { :; }
+config_get_bool() { export "$1=$OFM_TEST_ENABLED"; }
+config_get() {
+  local value="$4"
+  case "$3" in
+    data_dir) value="$OFM_TEST_DATA" ;;
+    api_port) value=19000 ;;
+    web_port) value=19001 ;;
+    api_interface) value=lan ;;
+    web_interface) value=loopback ;;
+  esac
+  export "$1=$value"
+}
+procd_open_instance() { printf 'OPEN:%s\\n' "$1"; }
+procd_close_instance() { :; }
+procd_set_param() { printf '%s\\n' "$@"; }
+procd_add_reload_trigger() { printf 'RELOAD:%s\\n' "$1"; }
+procd_add_interface_trigger() { printf 'IFACE:%s\\n' "$2"; }
+. "$1"
+start_service
+service_triggers
+`)
+  const script = new URL('files/etc/init.d/ofm', root).pathname
+  const env = { ...process.env, OFM_TEST_DATA: path.join(dir, 'data with spaces'), OFM_TEST_ENABLED: '1' }
+  const enabled = (await execute('sh', [harness, script], { env })).stdout
+  for (const value of ['OPEN:main', 'OFM_API_PORT=19000', 'OFM_WEB_PORT=19001', 'OFM_API_INTERFACE=lan', 'OFM_WEB_INTERFACE=loopback', `OFM_HOME=${env.OFM_TEST_DATA}`, 'RELOAD:openwrt-ofm', 'IFACE:lan', 'IFACE:loopback']) assert.ok(enabled.includes(value), value)
+  const disabled = (await execute('sh', [harness, script], { env: { ...env, OFM_TEST_ENABLED: '0' } })).stdout
+  assert.ok(!disabled.includes('OPEN:main'))
+})
 
 test('接口绑定自动选取本地地址，显式 IP 必须属于该接口，失效时不回退全接口', async () => {
   const query = async name => ({ up: name !== 'wan', 'ipv4-address': [{ address: '192.168.8.1' }], 'ipv6-address': [{ address: 'fd00::1' }] })

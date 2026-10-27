@@ -7,9 +7,9 @@
 'require ui';
 'require poll';
 
-var callStatus = rpc.declare({ object: 'ourfreemodel', method: 'status', expect: {} });
-var callService = rpc.declare({ object: 'ourfreemodel', method: 'service', params: ['action'], expect: {} });
-var callPassword = rpc.declare({ object: 'ourfreemodel', method: 'set_password', params: ['password', 'confirmation'], expect: {} });
+var callStatus = rpc.declare({ object: 'ourfreemodel', method: 'status', expect: { '': {} }, reject: true });
+var callService = rpc.declare({ object: 'ourfreemodel', method: 'service', params: ['action'], expect: { '': {} }, reject: true });
+var callPassword = rpc.declare({ object: 'ourfreemodel', method: 'set_password', params: ['password', 'confirmation'], expect: { '': {} }, reject: true });
 
 function addresses(net) {
 	return [].concat(net.getIPAddrs ? net.getIPAddrs() : [], net.getIP6Addrs ? net.getIP6Addrs() : []).map(function(ip) { return ip.split('/')[0]; });

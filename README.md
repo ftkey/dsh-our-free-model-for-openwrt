@@ -18,7 +18,7 @@
 ARM64 目标依据 [ER1-WRT-CI 的 ROM 配置](https://github.com/ftkey/ER1-WRT-CI/blob/main/.github/workflows/build-firmware.yml) 选择。ROM 使用 VIKINGYFY/immortalwrt，而此处和参考项目一样使用官方 ImmortalWrt snapshot SDK；两者并非同一构建，安装时仍需核对设备架构、APK 格式和 Node.js 版本。
 
 1. 将**本目录内容**放在新仓库根目录，确保包含隐藏的 `.github/`、根 `Makefile`、`files/` 和 `payload/`。不要将整个 `openwrt-ofm` 嵌套一层上传，也不要上传 `dist/`。
-2. 推送到 `main` 后会先检查并同步上游再编译；也可在 **Actions → Build APK → Run workflow** 手动运行（默认勾选 `sync_upstream`）。PR 和版本标签仅构建对应提交，不同步上游。
+2. 推送到 `main` 后先自测，再编译当前已提交快照；也可在 **Actions → Build APK → Run workflow** 手动运行（默认不勾选 `sync_upstream`）。PR 和版本标签同样只构建对应提交。定时运行或手动明确勾选 `sync_upstream` 才同步上游。
 3. 编译完成后下载 Artifacts 中对应平台的 ZIP。每个平台包含 APK、`SHA256SUMS`、`APK-METADATA.txt`、`SDK.config`、SDK 下载校验列表、移植版本信息及源提交 SHA。
 4. 需要发布到 Releases 时，手动运行时勾选 `publish`，或推送 `v*` 标签。普通分支推送只上传 Artifact。无需配置额外 Secret，发布使用仓库内置 `GITHUB_TOKEN`。
 
@@ -33,7 +33,8 @@ APK 使用 SDK 的文件命名规则，例如 `dsh-our-free-model-for-openwrt-2.
 - 上游版本不变时自动递增 `PKG_RELEASE`；版本升级时重置为 `1`。版本回退或必要文件缺失会报错停止。
 - 定时运行时，如果上游没变化且当前仓库提交已有成功运行记录，则跳过编译；没有成功记录时继续构建，因此首次失败后可在后续定时运行中重试。手动运行始终编译。
 - ARM64 和 AMD64 构建固定使用同步后确定的同一个仓库提交；`SOURCE-SHA`、`PORT-VERSION.json` 分别记录移植仓库与上游提交。
-- 手动取消勾选 `sync_upstream`，可只重新编译现有快照；勾选 `publish` 可同时发布 Releases。定时运行默认只上传 Artifact。
+- 普通推送和手动默认只编译当前快照；手动勾选 `sync_upstream` 才同步上游。勾选 `publish` 可同时发布 Releases。定时运行默认只上传 Artifact。
+- 已知上游同步可能被 GitHub 的 OAuth 凭据推送保护拦截。保留该保护和原登录功能，当前快照构建不依赖同步成功。
 
 将新版工作流和 `scripts/sync-upstream.sh` 一起推送到 `main` 后生效，无需额外 PAT 或 Secret。工作流使用内置 `GITHUB_TOKEN` 写回同步结果；`main` 的分支规则需允许该机器人提交。
 
@@ -138,7 +139,7 @@ tests/                         WebUI、API、接口绑定及 LuCI 回归测试
 LICENSE                        上游 MIT 许可
 ```
 
-Actions 先检查上游默认分支并将更新保存为仓库快照，再使用确定提交的 `payload/` 编译；两个平台不会各自拉取上游。`payload/PORT-VERSION.json` 记录上游版本和来源提交。当前约 42 MiB，保留上游 `src/engine-parts` 分片；上游 Magpie 二进制目前只有 Windows 版本，本包不提供其 Linux 引擎，不能视为所有平台专用功能均可用。
+Actions 在普通推送时构建已提交的快照；定时或明确请求同步时，先保存上游更新，再使用确定提交的 `payload/` 编译。两个平台不会各自拉取上游。`payload/PORT-VERSION.json` 记录上游版本和来源提交。当前约 42 MiB，保留上游 `src/engine-parts` 分片；上游 Magpie 二进制目前只有 Windows 版本，本包不提供其 Linux 引擎，不能视为所有平台专用功能均可用。
 
 日常更新由 Action 自动完成。如需在本地手动更新（上游已有预编译 `packages/standalone/web/` 时）：
 
@@ -160,3 +161,15 @@ bash scripts/build-apk.sh /path/to/sdk ./dist qualcommax ipq60xx
 ```
 
 也可把根 `Makefile`、`files/`、`payload/` 复制到 ROM 源码的 `package/dsh-our-free-model-for-openwrt/`，在 ROM 配置中启用 `CONFIG_PACKAGE_dsh-our-free-model-for-openwrt=y`。旧 `make-ipk.sh` / `mkar.py` 仅保留为历史 opkg 工具，不参与 APK 工作流。
+
+自测命令：
+
+```sh
+node --test tests/*.test.mjs
+# 以下仅在一次性 Linux 容器中运行；会写入容器 /usr/lib、/etc。
+docker run --rm --network none -e OFM_CONTAINER_SMOKE=1 \
+  --mount "type=bind,src=$PWD,dst=/work,readonly" -w /work \
+  node:24-bookworm node scripts/test-installed-runtime.mjs
+```
+
+安装后启动自测运行真实 CLI 和运行时，并为 Debian 容器缺少的 netifd/procd 提供适配器；不等同于路由器实机验证。
