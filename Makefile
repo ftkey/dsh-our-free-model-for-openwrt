@@ -29,7 +29,8 @@ endef
 
 define Build/Prepare
 	$(call Build/Prepare/Default)
-	$(CP) ./payload/. $(PKG_BUILD_DIR)/
+	$(INSTALL_DIR) $(PKG_BUILD_DIR)/payload
+	$(CP) ./payload/. $(PKG_BUILD_DIR)/payload/
 endef
 
 define Build/Configure
@@ -40,7 +41,7 @@ endef
 
 define Package/$(PKG_NAME)/install
 	$(INSTALL_DIR) $(1)/usr/lib/ofm
-	$(CP) $(PKG_BUILD_DIR)/. $(1)/usr/lib/ofm/
+	$(CP) $(PKG_BUILD_DIR)/payload/. $(1)/usr/lib/ofm/
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) ./files/etc/init.d/ofm $(1)/etc/init.d/ofm
 	$(INSTALL_DIR) $(1)/etc/config
