@@ -1,21 +1,27 @@
 #!/bin/sh /etc/rc.common
 # our-free-model 独立本地服务 · procd 守护
 # 数据目录：/usr/lib/ofm-data（UCI 可改）
-# 服务端口：18900（UCI 可改），管理页经 SSH 隧道访问 127.0.0.1:18900
+# 服务端口：18900（UCI 可改），先验证访问密码再进入管理页。
 
 USE_PROCD=1
 START=99
 STOP=15
+EXTRA_COMMANDS="password"
+EXTRA_HELP="	password 设置或重置端口访问密码，并重启服务"
 
 OFM_DATA_DEFAULT="/usr/lib/ofm-data"
 OFM_HOME_DIR="$OFM_DATA_DEFAULT"
 OFM_PORT="18900"
+OFM_HOST="0.0.0.0"
+OFM_PUBLIC_ORIGIN=""
 
 ofm_read_uci() {
   config_load openwrt-ofm 2>/dev/null || true
-  local d p
+  local d p h o
   d=$(uci -q get openwrt-ofm.@ofm[0].data_dir 2>/dev/null) && OFM_HOME_DIR="$d"
   p=$(uci -q get openwrt-ofm.@ofm[0].port 2>/dev/null) && OFM_PORT="$p"
+  h=$(uci -q get openwrt-ofm.@ofm[0].host 2>/dev/null) && OFM_HOST="$h"
+  o=$(uci -q get openwrt-ofm.@ofm[0].public_origin 2>/dev/null) && OFM_PUBLIC_ORIGIN="$o"
 }
 
 start_service() {
@@ -23,10 +29,9 @@ start_service() {
   mkdir -p "$OFM_HOME_DIR"
 
   procd_open_instance
-  procd_set_param command /usr/bin/node /usr/lib/ofm/packages/standalone/cli.mjs \
-    --port "$OFM_PORT" --data-dir "$OFM_HOME_DIR"
+  procd_set_param command /usr/bin/node /usr/lib/ofm-access/cli.mjs
   # 使用上游默认策略，不额外开启模型探测。
-  procd_set_param env OFM_HOME="$OFM_HOME_DIR"
+  procd_set_param env OFM_HOME="$OFM_HOME_DIR" OFM_PORT="$OFM_PORT" OFM_HOST="$OFM_HOST" OFM_PUBLIC_ORIGIN="$OFM_PUBLIC_ORIGIN"
   procd_set_param stdout 1
   procd_set_param stderr 1
   procd_set_param respawn 60 10 0
@@ -40,6 +45,11 @@ stop_service() {
 
 status() {
   ofm_read_uci
-  echo "dsh-our-free-model-for-openwrt: port $OFM_PORT, data dir $OFM_HOME_DIR"
-  curl -s "http://127.0.0.1:$OFM_PORT/health" 2>/dev/null || echo "(health endpoint unreachable)"
+  echo "dsh-our-free-model-for-openwrt: $OFM_HOST:$OFM_PORT, data dir $OFM_HOME_DIR"
+  /sbin/service ofm running
+}
+
+password() {
+  /usr/bin/node /usr/lib/ofm-access/password.mjs /etc/ofm-access.json || return 1
+  /etc/init.d/ofm restart
 }

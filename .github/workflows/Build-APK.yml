@@ -29,6 +29,17 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  test-access:
+    name: 验证端口密码保护
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --test tests/access-gateway.test.mjs
+
   prepare:
     name: 检查并同步上游
     runs-on: ubuntu-24.04
@@ -119,7 +130,7 @@ jobs:
 
   build:
     name: APK / ${{ matrix.platform }}
-    needs: prepare
+    needs: [prepare, test-access]
     if: needs.prepare.outputs.should_build == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 180

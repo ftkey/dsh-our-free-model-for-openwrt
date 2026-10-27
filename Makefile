@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=dsh-our-free-model-for-openwrt
 PKG_VERSION:=$(shell python3 -c 'import json; print(json.load(open("$(CURDIR)/payload/PORT-VERSION.json"))["version"])')
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 PKG_LICENSE:=MIT
 PKG_LICENSE_FILES:=LICENSE
 PKG_MAINTAINER:=ftkey
@@ -25,6 +25,7 @@ endef
 
 define Package/$(PKG_NAME)/conffiles
 /etc/config/openwrt-ofm
+/etc/ofm-access.json
 endef
 
 define Build/Prepare
@@ -46,6 +47,9 @@ define Package/$(PKG_NAME)/install
 	$(INSTALL_BIN) ./files/etc/init.d/ofm $(1)/etc/init.d/ofm
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_CONF) ./files/etc/config/openwrt-ofm $(1)/etc/config/openwrt-ofm
+	$(INSTALL_CONF) ./files/etc/ofm-access.json $(1)/etc/ofm-access.json
+	$(INSTALL_DIR) $(1)/usr/lib/ofm-access
+	$(CP) ./files/usr/lib/ofm-access/. $(1)/usr/lib/ofm-access/
 endef
 
 $(eval $(call BuildPackage,$(PKG_NAME)))

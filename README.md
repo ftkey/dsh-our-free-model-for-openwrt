@@ -57,24 +57,48 @@ apk --print-arch
 # 文件名按实际下载结果替换
 apk add --allow-untrusted ./dsh-our-free-model-for-openwrt-2.7.2-r1.apk
 /etc/init.d/ofm enable
-/etc/init.d/ofm start
+# 交互输入两次密码（至少 12 个字符）；保存后自动重启服务。
+/etc/init.d/ofm password
 /etc/init.d/ofm status
 logread -e ofm
 ```
 
 这是独立 SDK 构建的第三方 APK，ROM 默认不信任其签名，因此安装时使用 `--allow-untrusted`。依赖无法满足时先核对 ROM 软件源；不要强制跳过 Node.js 依赖。旧 `mkapk.py` 手工生成的 `dist/*.apk` 不属于 SDK 产物，请重新通过 Actions 编译；该入口现已停用。
 
-服务入口已修正为 `/usr/lib/ofm/packages/standalone/cli.mjs`。`/etc/config/openwrt-ofm` 为 SDK 声明的配置文件，升级时由包管理器处理保留。
+服务入口为 `/usr/lib/ofm-access/cli.mjs`，密码网关后的上游服务只监听本机临时端口。未配置访问密码时拒绝启动，不提供默认密码。`/etc/config/openwrt-ofm`、`/etc/ofm-access.json` 均声明为升级保留配置；后者仅保存 scrypt 随机盐和密码哈希，权限为 `0600`。
 
 ## 管理页与 API
 
-默认端口 `18900`。管理页仅允许本机访问，在电脑上建立 SSH 隧道：
+默认监听 `0.0.0.0:18900`。在局域网浏览器打开 `http://<路由器IP>:18900`，先输入访问密码，通过后直接进入原管理页。此包暂不提供 LuCI 菜单；入口就是该地址。
+
+管理页、静态资源、健康检查和 API 均经过密码网关。登录状态保存在 HttpOnly、SameSite=Strict Cookie 中，8 小时后需重新登录；点击管理页退出即可注销。连续输错 5 次后，该来源 IP 暂停验证 15 分钟。修改或忘记密码时，在 SSH 中重新运行 `/etc/init.d/ofm password`；服务重启会使已有登录失效。
+
+HTTP 不加密网络上传输的密码。请在可信局域网使用，或通过 HTTPS 反向代理、SSH 隧道访问；不要将 HTTP 端口直接映射到公网。仅通过 SSH 隧道访问时，可改为只监听本机：
+
+```sh
+uci set openwrt-ofm.main.host='127.0.0.1'
+uci commit openwrt-ofm
+/etc/init.d/ofm restart
+```
+
+若使用 HTTPS 反向代理，请额外设置 `uci set openwrt-ofm.main.public_origin='https://<你的域名>'` 后提交并重启，代理转发到本机端口；这样同源检查和 Secure Cookie 会使用配置的 HTTPS 来源。网关不会信任客户端自行提供的 `X-Forwarded-*` 头。
+
+然后在电脑上建立 SSH 隧道：
 
 ```sh
 ssh -L 18900:127.0.0.1:18900 root@<路由器IP>
 ```
 
-然后访问 `http://127.0.0.1:18900`，登录链接从路由器服务日志获取。API 基址为 `http://127.0.0.1:18900/v1`；需要其他局域网设备调用时，在管理页开启「LAN 推理中继」，使用该功能配置的独立端口和密钥。默认管理端口不会直接开放给 LAN。
+隧道建立后访问 `http://127.0.0.1:18900`，仍需输入访问密码，不再从日志获取登录令牌。
+
+API 基址为 `http://<路由器IP>:18900/v1`。已登录的浏览器可以直接使用；外部 API 客户端需要同时提供 HTTP Basic 访问密码（用户名固定为 `ofm`）和 `X-API-Key`。API Key 仍在管理页查看，不能用访问密码代替。例如下面的命令会交互询问访问密码，避免将密码写入命令历史：
+
+```sh
+curl --user ofm -H 'X-API-Key: <管理页中的API Key>' \
+  http://<路由器IP>:18900/v1/models
+```
+
+只支持 Bearer、无法配置 Basic 与自定义 Header 的客户端不能直接使用这个密码保护端口。上游独立 LAN 中继启动时默认关闭；本段密码保护仅针对配置的 `18900` 端口。
 
 默认数据目录 `/usr/lib/ofm-data`。建议改到持久挂载盘，避免占用路由器内部存储：
 
@@ -96,6 +120,9 @@ build-payload.sh               从上游工作树刷新运行时快照
 payload/                       随仓库提交的运行时及预编译 Web UI
 files/etc/init.d/ofm            procd 启动脚本
 files/etc/config/openwrt-ofm    UCI 配置
+files/etc/ofm-access.json       初始空密码配置（首次安装需设置）
+files/usr/lib/ofm-access/       独立密码网关，不受上游 payload 同步覆盖
+tests/access-gateway.test.mjs   密码、会话、跨站及 API 保护回归测试
 LICENSE                        上游 MIT 许可
 ```
 
