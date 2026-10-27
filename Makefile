@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=dsh-our-free-model-for-openwrt
 PKG_VERSION:=$(shell python3 -c 'import json; print(json.load(open("$(CURDIR)/payload/PORT-VERSION.json"))["version"])')
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 PKG_LICENSE:=MIT
 PKG_LICENSE_FILES:=LICENSE
 PKG_MAINTAINER:=ftkey
@@ -15,7 +15,7 @@ define Package/$(PKG_NAME)
   CATEGORY:=Network
   TITLE:=Our Free Model standalone gateway for OpenWrt
   URL:=https://github.com/ftkey/dsh-our-free-model-for-openwrt
-  DEPENDS:=+node
+  DEPENDS:=+node +luci-base +rpcd +rpcd-mod-luci
 endef
 
 define Package/$(PKG_NAME)/description
@@ -50,6 +50,23 @@ define Package/$(PKG_NAME)/install
 	$(INSTALL_CONF) ./files/etc/ofm-access.json $(1)/etc/ofm-access.json
 	$(INSTALL_DIR) $(1)/usr/lib/ofm-access
 	$(CP) ./files/usr/lib/ofm-access/. $(1)/usr/lib/ofm-access/
+	$(INSTALL_DIR) $(1)/www/luci-static/resources/view
+	$(INSTALL_DATA) ./files/www/luci-static/resources/view/ourfreemodel.js $(1)/www/luci-static/resources/view/
+	$(INSTALL_DIR) $(1)/usr/share/luci/menu.d $(1)/usr/share/rpcd/acl.d
+	$(INSTALL_DATA) ./files/usr/share/luci/menu.d/luci-app-ourfreemodel.json $(1)/usr/share/luci/menu.d/
+	$(INSTALL_DATA) ./files/usr/share/rpcd/acl.d/luci-app-ourfreemodel.json $(1)/usr/share/rpcd/acl.d/
+	$(INSTALL_DIR) $(1)/usr/libexec/rpcd $(1)/etc/uci-defaults
+	$(INSTALL_BIN) ./files/usr/libexec/rpcd/ourfreemodel $(1)/usr/libexec/rpcd/
+	$(INSTALL_BIN) ./files/etc/uci-defaults/90-ourfreemodel $(1)/etc/uci-defaults/
+endef
+
+define Package/$(PKG_NAME)/postinst
+#!/bin/sh
+[ -n "$${IPKG_INSTROOT}" ] && exit 0
+[ ! -f /etc/uci-defaults/90-ourfreemodel ] || /bin/sh /etc/uci-defaults/90-ourfreemodel || exit 1
+rm -f /tmp/luci-indexcache /tmp/luci-indexcache.*
+/etc/init.d/rpcd restart >/dev/null 2>&1 || true
+exit 0
 endef
 
 $(eval $(call BuildPackage,$(PKG_NAME)))

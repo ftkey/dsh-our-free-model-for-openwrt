@@ -1,0 +1,30 @@
+#!/bin/sh
+# 为旧版保留配置补齐双端口字段；既有显式选择不被覆盖。
+uci -q get openwrt-ofm.main >/dev/null || uci set openwrt-ofm.main=ofm
+uci -q get openwrt-ofm.main.enabled >/dev/null || uci set openwrt-ofm.main.enabled='1'
+if ! uci -q get openwrt-ofm.main.api_port >/dev/null; then
+  old_port=$(uci -q get openwrt-ofm.main.port)
+  uci set openwrt-ofm.main.api_port="${old_port:-18900}"
+fi
+default_interface=lan
+old_host=$(uci -q get openwrt-ofm.main.host)
+case "$old_host" in
+  127.0.0.1|::1) default_interface=loopback ;;
+esac
+for kind in api web; do
+  uci -q get "openwrt-ofm.main.${kind}_interface" >/dev/null || uci set "openwrt-ofm.main.${kind}_interface=$default_interface"
+  if [ "$default_interface" = loopback ] && ! uci -q get "openwrt-ofm.main.${kind}_address" >/dev/null; then
+    uci set "openwrt-ofm.main.${kind}_address=$old_host"
+  fi
+done
+if ! uci -q get openwrt-ofm.main.web_public_origin >/dev/null; then
+  old_origin=$(uci -q get openwrt-ofm.main.public_origin)
+  [ -z "$old_origin" ] || uci set "openwrt-ofm.main.web_public_origin=$old_origin"
+fi
+if ! uci -q get openwrt-ofm.main.web_port >/dev/null; then
+  web_port=18901
+  [ "$(uci -q get openwrt-ofm.main.api_port)" = "$web_port" ] && web_port=18902
+  uci set "openwrt-ofm.main.web_port=$web_port"
+fi
+uci commit openwrt-ofm
+exit 0

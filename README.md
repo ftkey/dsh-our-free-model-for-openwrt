@@ -1,6 +1,6 @@
 # dsh-our-free-model-for-openwrt
 
-将 [dsh-our-free-model](https://github.com/Ebony-Vinyl/dsh-our-free-model) 的独立 Node.js 服务移植到 OpenWrt，提供 OpenAI 兼容 API 和本机 Web 管理页。
+将 [dsh-our-free-model](https://github.com/Ebony-Vinyl/dsh-our-free-model) 的独立 Node.js 服务移植到 OpenWrt，提供独立的 OpenAI 兼容 API、带管理密码的自带 WebUI，以及 OurFreeModel LuCI 菜单。
 
 仓库地址：[ftkey/dsh-our-free-model-for-openwrt](https://github.com/ftkey/dsh-our-free-model-for-openwrt)。软件包名和 APK 文件名前缀统一为 `dsh-our-free-model-for-openwrt`。这是安装到现有 ROM 的软件包，不会生成或重命名整个路由器固件镜像。
 
@@ -22,7 +22,7 @@ ARM64 目标依据 [ER1-WRT-CI 的 ROM 配置](https://github.com/ftkey/ER1-WRT-
 3. 编译完成后下载 Artifacts 中对应平台的 ZIP。每个平台包含 APK、`SHA256SUMS`、`APK-METADATA.txt`、`SDK.config`、SDK 下载校验列表、移植版本信息及源提交 SHA。
 4. 需要发布到 Releases 时，手动运行时勾选 `publish`，或推送 `v*` 标签。普通分支推送只上传 Artifact。无需配置额外 Secret，发布使用仓库内置 `GITHUB_TOKEN`。
 
-APK 使用 SDK 的文件命名规则，例如 `dsh-our-free-model-for-openwrt-2.7.2-r1.apk`，实际版本以 Artifact 为准。载荷是纯 JS，配方使用 `PKGARCH:=all`；仍分别使用两个平台 SDK 处理依赖和验证，产物按平台分开保存。不会打包 Node.js，需要从固件软件源安装。
+APK 使用 SDK 的文件命名规则，例如 `dsh-our-free-model-for-openwrt-2.7.2-r3.apk`，实际版本以 Artifact 为准。载荷是纯 JS，配方使用 `PKGARCH:=all`；仍分别使用两个平台 SDK 处理依赖和验证，产物按平台分开保存。不会打包 Node.js，需要从固件软件源安装。
 
 ## 自动同步上游
 
@@ -55,9 +55,11 @@ apk --print-arch
 
 ```sh
 # 文件名按实际下载结果替换
-apk add --allow-untrusted ./dsh-our-free-model-for-openwrt-2.7.2-r1.apk
+apk add --allow-untrusted ./dsh-our-free-model-for-openwrt-2.7.2-r3.apk
 /etc/init.d/ofm enable
-# 交互输入两次密码（至少 12 个字符）；保存后自动重启服务。
+/etc/init.d/ofm start
+# 然后在 LuCI → 服务 → OurFreeModel 中设置 WebUI 密码。
+# 也可通过 SSH 交互设置（输入不回显，不会重启模型 API）：
 /etc/init.d/ofm password
 /etc/init.d/ofm status
 logread -e ofm
@@ -65,49 +67,55 @@ logread -e ofm
 
 这是独立 SDK 构建的第三方 APK，ROM 默认不信任其签名，因此安装时使用 `--allow-untrusted`。依赖无法满足时先核对 ROM 软件源；不要强制跳过 Node.js 依赖。旧 `mkapk.py` 手工生成的 `dist/*.apk` 不属于 SDK 产物，请重新通过 Actions 编译；该入口现已停用。
 
-服务入口为 `/usr/lib/ofm-access/cli.mjs`，密码网关后的上游服务只监听本机临时端口。未配置访问密码时拒绝启动，不提供默认密码。`/etc/config/openwrt-ofm`、`/etc/ofm-access.json` 均声明为升级保留配置；后者仅保存 scrypt 随机盐和密码哈希，权限为 `0600`。
+服务入口为 `/usr/lib/ofm-access/cli.mjs`。上游运行时只监听本机临时端口；面向用户提供两个独立入口。`/etc/config/openwrt-ofm`、`/etc/ofm-access.json` 均声明为升级保留配置；后者仅保存 WebUI 密码的 scrypt 随机盐和哈希，权限为 `0600`。没有默认管理密码；首次设置之前 WebUI 不启动，API 仍可独立运行。
 
-## 管理页与 API
+## LuCI 菜单
 
-默认监听 `0.0.0.0:18900`。在局域网浏览器打开 `http://<路由器IP>:18900`，先输入访问密码，通过后直接进入原管理页。此包暂不提供 LuCI 菜单；入口就是该地址。
+安装后进入 **服务 → OurFreeModel**。LuCI 菜单和页面布局采用 [OpenWrt 官方应用示例](https://github.com/openwrt/luci/tree/master/applications/luci-app-example) 的菜单、JavaScript 视图和 ACL 结构。本包依赖 `luci-base`、`rpcd` 和 `rpcd-mod-luci`，安装时会刷新 RPC 服务和 LuCI 菜单缓存。菜单提供：
 
-管理页、静态资源、健康检查和 API 均经过密码网关。登录状态保存在 HttpOnly、SameSite=Strict Cookie 中，8 小时后需重新登录；点击管理页退出即可注销。连续输错 5 次后，该来源 IP 暂停验证 15 分钟。修改或忘记密码时，在 SSH 中重新运行 `/etc/init.d/ofm password`；服务重启会使已有登录失效。
+- 运行状态、版本、Node.js 版本、数据目录、WebUI 链接和实际 API Base URL。
+- 启动、停止、重启、启用/关闭开机自启，以及总服务启用开关。
+- 设置或重置 **WebUI 管理密码**。密码不会写入明文 UCI，也不会出现在命令参数中。重置注销旧管理会话，只重新加载 WebUI，不重启模型 API、不更换 API Key。
+- 分别配置 **API 端口、WebUI 端口**，以及两个入口各自的逻辑网络接口和本地 IP。
+- 数据目录和 WebUI HTTPS 反向代理来源配置。更改数据目录不会自动迁移原目录内容。
 
-HTTP 不加密网络上传输的密码。请在可信局域网使用，或通过 HTTPS 反向代理、SSH 隧道访问；不要将 HTTP 端口直接映射到公网。仅通过 SSH 隧道访问时，可改为只监听本机：
+配置修改后点击「保存并应用」。两个端口必须不同。网络接口上线、下线或地址变更时，服务会按所选接口重新加载；选中的接口没有可用 IP、指定 IP 不属于该接口或端口被占用时，该入口停止并显示原因，不会回退到监听所有接口。另一入口仍可独立运行。
+
+## WebUI 与模型 API
+
+| 入口 | 默认地址（lan 接口本地 IP） | 鉴权 |
+| --- | --- | --- |
+| 自带 WebUI | `http://<路由器LAN IP>:18901` | WebUI 管理密码 |
+| 模型 API | `http://<路由器LAN IP>:18900/v1` | `Authorization: Bearer <API Key>` |
+
+WebUI 密码保护的是上游自带管理界面（概览、模型清单、用量统计、账号渠道、API 接入、服务设置等）。验证成功后直接进入原 WebUI；管理资源及管理接口同样要求登录。管理会话采用 HttpOnly、SameSite=Strict Cookie，8 小时过期；点击 WebUI 退出会注销会话。连续输错 5 次后，该来源 IP 暂停验证 15 分钟。忘记密码时，从 LuCI 重置，或在 SSH 中执行 `/etc/init.d/ofm password`。
+
+模型 API **不要求 WebUI 密码、不要求 HTTP Basic、不要求先登录浏览器**，可直接配置到标准 OpenAI 兼容客户端。API Key 在自带 WebUI 的「API 接入」中查看或轮换，轮换后旧 Key 立即失效。API 端口不提供 WebUI 或管理接口，不能用 API Key 登录 WebUI；WebUI 端口也不承担模型转发。示例：
 
 ```sh
-uci set openwrt-ofm.main.host='127.0.0.1'
-uci commit openwrt-ofm
-/etc/init.d/ofm restart
+curl -H 'Authorization: Bearer <API Key>' \
+  http://<路由器LAN IP>:18900/v1/models
 ```
 
-若使用 HTTPS 反向代理，请额外设置 `uci set openwrt-ofm.main.public_origin='https://<你的域名>'` 后提交并重启，代理转发到本机端口；这样同源检查和 Secure Cookie 会使用配置的 HTTPS 来源。网关不会信任客户端自行提供的 `X-Forwarded-*` 头。
+转发支持原有 OpenAI、Anthropic 和 Gemini 兼容路由，并保留流式响应。两个端口及监听地址以 LuCI 实际状态为准，WebUI 中显示的 API Base URL 也会指向独立 API 入口。上游额外 LAN 中继由本包的独立 API 入口替代；监听配置统一在 LuCI 中维护，避免再开第三个入口。
 
-然后在电脑上建立 SSH 隧道：
+默认两个入口都绑定 `lan`。可以分别选择 `loopback`、`lan` 或其他逻辑接口；留空本地 IP 时优先使用接口 IPv4，没有 IPv4 时使用 IPv6，也可指定该接口的某个本地 IP。显式选择「所有本地接口」才会监听 `0.0.0.0`。这是按接口的本地 IP 绑定监听，防火墙入站规则仍由路由器原配置控制，本包不会自动放行 WAN。
 
-```sh
-ssh -L 18900:127.0.0.1:18900 root@<路由器IP>
-```
+如需映射给外部模型客户端，只映射 **API 端口**，使用 API Key。HTTP 不加密传输的密码或 Key，跨不可信网络时应使用 HTTPS、VPN 或 SSH 隧道。WebUI 支持 HTTPS 反向代理：在 LuCI 设置「WebUI HTTPS 外部来源」为 `https://<域名>`（不含路径），代理转发到本机 WebUI 端口；网关据此检查来源并设置 Secure Cookie，不信任客户端自行提供的 `X-Forwarded-*` 头。
 
-隧道建立后访问 `http://127.0.0.1:18900`，仍需输入访问密码，不再从日志获取登录令牌。
-
-API 基址为 `http://<路由器IP>:18900/v1`。已登录的浏览器可以直接使用；外部 API 客户端需要同时提供 HTTP Basic 访问密码（用户名固定为 `ofm`）和 `X-API-Key`。API Key 仍在管理页查看，不能用访问密码代替。例如下面的命令会交互询问访问密码，避免将密码写入命令历史：
+UCI 示例（端口和绑定接口也可直接在 LuCI 修改）：
 
 ```sh
-curl --user ofm -H 'X-API-Key: <管理页中的API Key>' \
-  http://<路由器IP>:18900/v1/models
-```
-
-只支持 Bearer、无法配置 Basic 与自定义 Header 的客户端不能直接使用这个密码保护端口。上游独立 LAN 中继启动时默认关闭；本段密码保护仅针对配置的 `18900` 端口。
-
-默认数据目录 `/usr/lib/ofm-data`。建议改到持久挂载盘，避免占用路由器内部存储：
-
-```sh
+uci set openwrt-ofm.main.api_port='18900'
+uci set openwrt-ofm.main.api_interface='lan'
+uci set openwrt-ofm.main.web_port='18901'
+uci set openwrt-ofm.main.web_interface='lan'
 uci set openwrt-ofm.main.data_dir='/mnt/ofm'
-uci set openwrt-ofm.main.port='18900'
 uci commit openwrt-ofm
 /etc/init.d/ofm restart
 ```
+
+只通过 SSH 使用管理页时，将 `web_interface` 改为 `loopback`，并在电脑上运行 `ssh -L 18901:127.0.0.1:18901 root@<路由器IP>`，然后访问 `http://127.0.0.1:18901`，仍需 WebUI 密码。API 可以继续独立绑定 `lan`。
 
 ## 本地维护
 
@@ -121,8 +129,12 @@ payload/                       随仓库提交的运行时及预编译 Web UI
 files/etc/init.d/ofm            procd 启动脚本
 files/etc/config/openwrt-ofm    UCI 配置
 files/etc/ofm-access.json       初始空密码配置（首次安装需设置）
-files/usr/lib/ofm-access/       独立密码网关，不受上游 payload 同步覆盖
-tests/access-gateway.test.mjs   密码、会话、跨站及 API 保护回归测试
+files/usr/lib/ofm-access/       WebUI 密码、独立 API、接口解析及 LuCI 后端
+files/www/luci-static/          OurFreeModel LuCI 配置页
+files/usr/share/luci/menu.d/    LuCI 菜单注册
+files/usr/share/rpcd/acl.d/     LuCI 读写权限
+files/usr/libexec/rpcd/         受 ACL 保护的服务控制与密码重置 RPC
+tests/                         WebUI、API、接口绑定及 LuCI 回归测试
 LICENSE                        上游 MIT 许可
 ```
 

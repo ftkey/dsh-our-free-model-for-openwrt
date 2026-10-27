@@ -30,7 +30,7 @@ concurrency:
 
 jobs:
   test-access:
-    name: 验证端口密码保护
+    name: 验证 WebUI、API 与 LuCI
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -38,7 +38,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - run: node --test tests/access-gateway.test.mjs
+      - run: node --test tests/*.test.mjs
 
   prepare:
     name: 检查并同步上游

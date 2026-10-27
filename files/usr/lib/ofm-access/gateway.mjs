@@ -19,17 +19,17 @@ const HEADERS = {
   'referrer-policy': 'no-referrer',
   'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
 }
-const PAGE = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Our Free Model · 访问验证</title>
+const PAGE = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Our Free Model · WebUI 登录</title>
 <style>body{margin:0;background:#f5f6f8;color:#1f2937;font:16px system-ui;display:grid;min-height:100vh;place-items:center}main{box-sizing:border-box;background:white;padding:32px;border-radius:16px;box-shadow:0 8px 32px #0001;width:min(92vw,400px)}h1{font-size:24px}p{color:#64748b;line-height:1.6}label{display:block;margin:24px 0 8px}input,button{box-sizing:border-box;width:100%;padding:12px;font:inherit;border:1px solid #cbd5e1;border-radius:8px}button{margin-top:20px;background:#0f766e;color:white;border:0;cursor:pointer}</style>
-<main><h1>Our Free Model</h1><p>请输入访问密码，验证后进入管理页面。</p><form method="post" action="${LOGIN}"><label for="password">访问密码</label><input id="password" name="password" type="password" autocomplete="current-password" required maxlength="128" autofocus><button type="submit">验证并进入</button></form></main></html>`
+<main><h1>Our Free Model</h1><p>请输入 WebUI 管理密码，验证后进入原管理页面。</p><form method="post" action="${LOGIN}"><label for="password">WebUI 管理密码</label><input id="password" name="password" type="password" autocomplete="current-password" required maxlength="128" autofocus><button type="submit">验证并进入</button></form></main></html>`
 
 const HOP = new Set(['connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade'])
-function cleanHeaders(headers) {
+export function cleanHeaders(headers) {
   const blocked = new Set([...HOP, ...String(headers.connection ?? '').toLowerCase().split(',').map(s => s.trim())])
   return Object.fromEntries(Object.entries(headers).filter(([key]) => !blocked.has(key.toLowerCase())))
 }
 
-export async function startAccessGateway({ targetUrl, managementKey, credential, host = '0.0.0.0', port = 18900, publicOrigin,
+export async function startAccessGateway({ targetUrl, managementKey, credential, host = '127.0.0.1', port = 18901, publicOrigin, apiBaseUrl,
   sessionMs = SESSION_MS, now = Date.now }) {
   const target = new URL(targetUrl)
   if (target.hostname !== '127.0.0.1' || target.protocol !== 'http:') throw new Error('内部服务必须为 IPv4 本机 HTTP 地址')
@@ -123,24 +123,17 @@ export async function startAccessGateway({ targetUrl, managementKey, credential,
       }
       const id = sessionId(req)
       const session = sessions.get(id)
-      // API clients may use HTTP Basic (ofm:access password) plus X-API-Key.
-      // A Bearer/API key by itself never bypasses the port password.
-      let basic = false
-      if (!session && /^Basic /i.test(req.headers.authorization ?? '') && !pathname.startsWith('/api/management')) {
-        const value = Buffer.from(req.headers.authorization.slice(6), 'base64').toString('utf8')
-        const colon = value.indexOf(':')
-        if (colon !== -1 && value.slice(0, colon) === 'ofm') basic = await check(value.slice(colon + 1), req, res)
-        else return json(res, 401, '访问凭据不正确')
-        if (!basic) return
-      }
-      if (!session && !basic) {
+      if (!session) {
         if (req.method === 'GET' && (pathname === '/' || String(req.headers.accept).includes('text/html'))) {
           res.writeHead(303, { ...HEADERS, location: LOGIN })
           return res.end()
         }
-        return json(res, 401, '请先验证访问密码')
+        return json(res, 401, '请先验证 WebUI 管理密码')
       }
-      if (pathname === '/api/management/session' || pathname === '/api/management/login/terminal') return json(res, 403, '请使用端口密码登录页面')
+      if (!pathname.startsWith('/api/management/') && !pathname.startsWith('/assets/') && pathname !== '/' && pathname !== '/ofm-access/client.js') {
+        return json(res, 404, '此端口仅用于 WebUI，模型请求请使用 API 端口')
+      }
+      if (pathname === '/api/management/session' || pathname === '/api/management/login/terminal') return json(res, 403, '请使用 WebUI 密码登录页面')
       if (pathname === '/ofm-access/client.js' && req.method === 'GET') {
         res.writeHead(200, { ...HEADERS, 'content-type': 'text/javascript; charset=utf-8' })
         return res.end(CLIENT)
@@ -151,6 +144,22 @@ export async function startAccessGateway({ targetUrl, managementKey, credential,
         sessions.delete(id)
         res.writeHead(200, { ...HEADERS, 'content-type': 'application/json', 'set-cookie': cookie('', req, 0) })
         return res.end('{"ok":true}')
+      }
+      let settingsBody
+      if (pathname === '/api/management/settings' && req.method === 'POST') {
+        const chunks = []
+        let bytes = 0
+        for await (const chunk of req) {
+          bytes += chunk.length
+          if (bytes > 16384) return json(res, 413, '设置内容过大')
+          chunks.push(chunk)
+        }
+        settingsBody = Buffer.concat(chunks)
+        let patch
+        try { patch = JSON.parse(settingsBody.toString('utf8')) } catch { return json(res, 400, '设置不是有效 JSON') }
+        if (patch?.standaloneLanEnabled === true || Object.hasOwn(patch ?? {}, 'standaloneLanPort')) {
+          return json(res, 400, 'API 监听接口和端口请在 LuCI → 服务 → OurFreeModel 中配置')
+        }
       }
       const headers = cleanHeaders(req.headers)
       headers.host = target.host
@@ -167,7 +176,9 @@ export async function startAccessGateway({ targetUrl, managementKey, credential,
         delete replyHeaders['access-control-allow-origin']
         const page = pathname === '/' && String(replyHeaders['content-type']).startsWith('text/html')
         const summary = pathname === '/api/management/summary' && upstream.statusCode === 200
-        if (req.method === 'GET' && (page || summary)) {
+        const channelInfo = pathname === '/api/management/channels/rpc' && upstream.statusCode === 200
+        const app = pathname === '/assets/app.js' && upstream.statusCode === 200
+        if ((req.method === 'GET' && (page || summary || app)) || channelInfo) {
           const chunks = []
           upstream.on('data', chunk => chunks.push(chunk))
           upstream.on('error', () => res.destroy())
@@ -175,9 +186,18 @@ export async function startAccessGateway({ targetUrl, managementKey, credential,
             try {
               let body = Buffer.concat(chunks).toString('utf8')
               if (page) body = body.replace('<head>', '<head><script src="/ofm-access/client.js"></script>')
-              else {
+              else if (app) {
+                body = body.replaceAll('仅监听回环地址', 'WebUI 密码保护').replaceAll('仅回环地址', '按 LuCI 接口配置')
+              } else {
                 const value = JSON.parse(body)
-                value.baseUrl = origin(req)
+                if (summary) {
+                  value.baseUrl = (typeof apiBaseUrl === 'function' ? apiBaseUrl(req) : apiBaseUrl) || origin(req)
+                  value.webUiUrl = origin(req)
+                  if (value.capabilities) value.capabilities.lan = false
+                } else if (value.value?.address && apiBaseUrl) {
+                  const api = new URL(typeof apiBaseUrl === 'function' ? apiBaseUrl(req) : apiBaseUrl)
+                  value.value.address = { host: api.hostname, port: Number(api.port) }
+                }
                 body = JSON.stringify(value)
               }
               delete replyHeaders['content-length']
@@ -195,7 +215,8 @@ export async function startAccessGateway({ targetUrl, managementKey, credential,
       proxy.on('error', () => { if (!res.headersSent) json(res, 502, '内部服务连接失败'); else res.destroy() })
       res.on('close', () => proxy.destroy())
       req.on('error', () => proxy.destroy())
-      req.pipe(proxy)
+      if (settingsBody) proxy.end(settingsBody)
+      else req.pipe(proxy)
     } catch {
       if (!res.headersSent && !res.destroyed) json(res, 500, '访问验证失败，请重试或检查服务日志')
       else res.destroy()
@@ -204,9 +225,10 @@ export async function startAccessGateway({ targetUrl, managementKey, credential,
   server.maxHeadersCount = 100
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, host, resolve) })
   cookieName = `ofm_access_${server.address().port}`
+  let closing
   return {
     port: server.address().port,
-    close: () => new Promise((resolve, reject) => {
+    close: () => closing ??= new Promise((resolve, reject) => {
       for (const entry of sessions.values()) revoke(entry)
       sessions.clear()
       server.close(error => error ? reject(error) : resolve())
