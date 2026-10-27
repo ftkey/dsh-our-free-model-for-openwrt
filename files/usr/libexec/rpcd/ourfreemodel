@@ -1,2 +1,2 @@
 #!/bin/sh
-exec /usr/bin/node /usr/lib/ofm-access/rpc.mjs "$@"
+exec /usr/bin/node /usr/lib/ourfreemodel-access/rpc.mjs "$@"

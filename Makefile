@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=dsh-our-free-model-for-openwrt
 PKG_VERSION:=$(shell python3 -c 'import json; print(json.load(open("$(CURDIR)/payload/PORT-VERSION.json"))["version"])')
-PKG_RELEASE:=3
+PKG_RELEASE:=4
 PKG_LICENSE:=MIT
 PKG_LICENSE_FILES:=LICENSE
 PKG_MAINTAINER:=ftkey
@@ -24,8 +24,9 @@ define Package/$(PKG_NAME)/description
 endef
 
 define Package/$(PKG_NAME)/conffiles
-/etc/config/openwrt-ofm
-/etc/ofm-access.json
+/etc/config/ourfreemodel
+/etc/ourfreemodel-access.json
+/etc/ourfreemodel-migrated
 endef
 
 define Build/Prepare
@@ -41,15 +42,16 @@ define Build/Compile
 endef
 
 define Package/$(PKG_NAME)/install
-	$(INSTALL_DIR) $(1)/usr/lib/ofm
-	$(CP) $(PKG_BUILD_DIR)/payload/. $(1)/usr/lib/ofm/
+	$(INSTALL_DIR) $(1)/usr/lib/ourfreemodel
+	$(CP) $(PKG_BUILD_DIR)/payload/. $(1)/usr/lib/ourfreemodel/
 	$(INSTALL_DIR) $(1)/etc/init.d
-	$(INSTALL_BIN) ./files/etc/init.d/ofm $(1)/etc/init.d/ofm
+	$(INSTALL_BIN) ./files/etc/init.d/ourfreemodel $(1)/etc/init.d/ourfreemodel
 	$(INSTALL_DIR) $(1)/etc/config
-	$(INSTALL_CONF) ./files/etc/config/openwrt-ofm $(1)/etc/config/openwrt-ofm
-	$(INSTALL_CONF) ./files/etc/ofm-access.json $(1)/etc/ofm-access.json
-	$(INSTALL_DIR) $(1)/usr/lib/ofm-access
-	$(CP) ./files/usr/lib/ofm-access/. $(1)/usr/lib/ofm-access/
+	$(INSTALL_CONF) ./files/etc/config/ourfreemodel $(1)/etc/config/ourfreemodel
+	$(INSTALL_CONF) ./files/etc/ourfreemodel-access.json $(1)/etc/ourfreemodel-access.json
+	$(INSTALL_CONF) ./files/etc/ourfreemodel-migrated $(1)/etc/ourfreemodel-migrated
+	$(INSTALL_DIR) $(1)/usr/lib/ourfreemodel-access
+	$(CP) ./files/usr/lib/ourfreemodel-access/. $(1)/usr/lib/ourfreemodel-access/
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/view
 	$(INSTALL_DATA) ./files/www/luci-static/resources/view/ourfreemodel.js $(1)/www/luci-static/resources/view/
 	$(INSTALL_DIR) $(1)/usr/share/luci/menu.d $(1)/usr/share/rpcd/acl.d

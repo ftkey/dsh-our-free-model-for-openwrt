@@ -1,24 +1,24 @@
 import fs from 'node:fs/promises'
-import { startStandalone } from '../ofm/packages/standalone/service.mjs'
+import { startStandalone } from '../ourfreemodel/packages/standalone/service.mjs'
 import { loadCredential } from './password.mjs'
 import { startAccessGateway } from './gateway.mjs'
 import { startApiGateway } from './api.mjs'
 import { resolveBinding, parsePort, httpAddress } from './bind.mjs'
 
-const stateFile = '/var/run/ofm/status.json'
-const state = { pid: process.pid, startedAt: Date.now(), dataDir: process.env.OFM_HOME,
+const stateFile = '/var/run/ourfreemodel/status.json'
+const state = { pid: process.pid, startedAt: Date.now(), dataDir: process.env.OURFREEMODEL_HOME,
   api: { running: false }, web: { running: false } }
 let service, api, web, closing = false
 let changes = Promise.resolve()
 const saveState = async () => {
-  await fs.mkdir('/var/run/ofm', { recursive: true, mode: 0o700 })
+  await fs.mkdir('/var/run/ourfreemodel', { recursive: true, mode: 0o700 })
   await fs.writeFile(stateFile + '.tmp', JSON.stringify(state), { mode: 0o600 })
   await fs.rename(stateFile + '.tmp', stateFile)
 }
 const endpoint = async (kind, defaultPort) => {
-  const iface = process.env[`OFM_${kind}_INTERFACE`] || 'lan'
-  const port = parsePort(process.env[`OFM_${kind}_PORT`] || defaultPort, kind === 'API' ? 'API' : 'WebUI')
-  const host = await resolveBinding(iface, process.env[`OFM_${kind}_ADDRESS`] || '')
+  const iface = process.env[`OURFREEMODEL_${kind}_INTERFACE`] || 'lan'
+  const port = parsePort(process.env[`OURFREEMODEL_${kind}_PORT`] || defaultPort, kind === 'API' ? 'API' : 'WebUI')
+  const host = await resolveBinding(iface, process.env[`OURFREEMODEL_${kind}_ADDRESS`] || '')
   return { interface: iface, host, port, url: httpAddress(host, port) }
 }
 const close = async () => {
@@ -31,10 +31,10 @@ const close = async () => {
   await fs.rm(stateFile, { force: true })
 }
 try {
-  const apiPort = parsePort(process.env.OFM_API_PORT || '18900', 'API')
-  const webPort = parsePort(process.env.OFM_WEB_PORT || '18901', 'WebUI')
+  const apiPort = parsePort(process.env.OURFREEMODEL_API_PORT || '18900', 'API')
+  const webPort = parsePort(process.env.OURFREEMODEL_WEB_PORT || '18901', 'WebUI')
   if (apiPort === webPort) throw new Error('API 与 WebUI 必须使用不同端口')
-  service = await startStandalone({ dataDir: process.env.OFM_HOME, port: 0, lanEnabled: false,
+  service = await startStandalone({ dataDir: process.env.OURFREEMODEL_HOME, port: 0, lanEnabled: false,
     startRelay: async () => { throw new Error('API 接口和端口由 LuCI OurFreeModel 配置') } })
   state.dataDir = service.dataDir
   state.version = service.version
@@ -48,19 +48,19 @@ try {
     web = undefined
     state.web = { running: false }
     try {
-      const credential = await loadCredential('/etc/ofm-access.json')
+      const credential = await loadCredential('/etc/ourfreemodel-access.json')
       const binding = await endpoint('WEB', webPort)
       const settings = JSON.parse(await fs.readFile(service.keyFile, 'utf8'))
       web = await startAccessGateway({
         targetUrl: service.url, managementKey: settings.managementKey, credential, ...binding,
-        publicOrigin: process.env.OFM_WEB_PUBLIC_ORIGIN || undefined,
+        publicOrigin: process.env.OURFREEMODEL_WEB_PUBLIC_ORIGIN || undefined,
         apiBaseUrl: req => {
           if (!state.api.running) return httpAddress('127.0.0.1', apiPort)
           const host = ['0.0.0.0', '::'].includes(state.api.host) ? new URL(`http://${req.headers.host}`).hostname : state.api.host
           return httpAddress(host, state.api.port)
         },
       })
-      state.web = { ...binding, url: process.env.OFM_WEB_PUBLIC_ORIGIN || binding.url, running: true }
+      state.web = { ...binding, url: process.env.OURFREEMODEL_WEB_PUBLIC_ORIGIN || binding.url, running: true }
     } catch (error) { state.web.error = `WebUI 启动失败：${error.message}` }
     await saveState()
   }

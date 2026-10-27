@@ -41,7 +41,7 @@ jobs:
       - run: node --test tests/*.test.mjs
       - name: 验证安装后启动及密码重载
         run: |
-          docker run --rm --network none -e OFM_CONTAINER_SMOKE=1 \
+          docker run --rm --network none -e OURFREEMODEL_CONTAINER_SMOKE=1 \
             --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/work,readonly" \
             -w /work node:24-bookworm node scripts/test-installed-runtime.mjs
 
@@ -189,15 +189,15 @@ jobs:
       - name: 缓存 SDK 归档
         uses: actions/cache@v4
         with:
-          path: ~/.cache/ofm-sdk/${{ matrix.platform }}
-          key: ofm-sdk-${{ matrix.platform }}-${{ steps.sdk.outputs.sha256 }}
+          path: ~/.cache/ourfreemodel-sdk/${{ matrix.platform }}
+          key: ourfreemodel-sdk-${{ matrix.platform }}-${{ steps.sdk.outputs.sha256 }}
 
       - name: 下载并验证 SDK
         env:
           SDK_ARCHIVE: ${{ steps.sdk.outputs.archive }}
           SDK_SHA256: ${{ steps.sdk.outputs.sha256 }}
         run: |
-          cache_dir="$HOME/.cache/ofm-sdk/${{ matrix.platform }}"
+          cache_dir="$HOME/.cache/ourfreemodel-sdk/${{ matrix.platform }}"
           archive_path="$cache_dir/$SDK_ARCHIVE"
           mkdir -p "$cache_dir"
           if [[ ! -f "$archive_path" ]] || \

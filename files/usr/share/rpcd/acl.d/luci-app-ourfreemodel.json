@@ -2,11 +2,11 @@
   "luci-app-ourfreemodel": {
     "description": "Configure OurFreeModel and reset its WebUI password",
     "read": {
-      "uci": ["openwrt-ofm", "network"],
+      "uci": ["ourfreemodel", "network"],
       "ubus": { "ourfreemodel": ["status"], "network.interface": ["dump"], "network.device": ["status"], "luci-rpc": ["getNetworkDevices"] }
     },
     "write": {
-      "uci": ["openwrt-ofm"],
+      "uci": ["ourfreemodel"],
       "ubus": { "ourfreemodel": ["set_password", "service"] }
     }
   }

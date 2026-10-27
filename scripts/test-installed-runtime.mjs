@@ -8,38 +8,38 @@ import net from 'node:net'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
-if (process.platform !== 'linux' || process.getuid() !== 0 || process.env.OFM_CONTAINER_SMOKE !== '1') {
-  throw new Error('必须在一次性 Linux 容器中设置 OFM_CONTAINER_SMOKE=1 后运行')
+if (process.platform !== 'linux' || process.getuid() !== 0 || process.env.OURFREEMODEL_CONTAINER_SMOKE !== '1') {
+  throw new Error('必须在一次性 Linux 容器中设置 OURFREEMODEL_CONTAINER_SMOKE=1 后运行')
 }
 const repo = fileURLToPath(new URL('../', import.meta.url))
 // OpenWrt installs Node at /usr/bin/node; the official test image uses /usr/local.
 try { await fs.access('/usr/bin/node') } catch { await fs.symlink(process.execPath, '/usr/bin/node') }
-for (const file of ['/usr/lib/ofm', '/usr/lib/ofm-access', '/etc/ofm-access.json']) {
+for (const file of ['/usr/lib/ourfreemodel', '/usr/lib/ourfreemodel-access', '/etc/ourfreemodel-access.json']) {
   await assert.rejects(fs.access(file), { code: 'ENOENT' }, `拒绝覆盖现有安装：${file}`)
 }
-await fs.cp(path.join(repo, 'payload'), '/usr/lib/ofm', { recursive: true })
+await fs.cp(path.join(repo, 'payload'), '/usr/lib/ourfreemodel', { recursive: true })
 await fs.cp(path.join(repo, 'files'), '/', { recursive: true })
-for (const file of ['/etc/init.d/ofm', '/usr/libexec/rpcd/ourfreemodel']) await fs.chmod(file, 0o755)
-await fs.chmod('/etc/ofm-access.json', 0o600)
+for (const file of ['/etc/init.d/ourfreemodel', '/usr/libexec/rpcd/ourfreemodel']) await fs.chmod(file, 0o755)
+await fs.chmod('/etc/ourfreemodel-access.json', 0o600)
 
 // netifd/procd facade: bind the selected logical interface to loopback and
 // deliver the actual reload signal from the shipped init script.
 await fs.writeFile('/bin/ubus', `#!/usr/bin/env node
 const fs = require('node:fs');
 if (process.argv[3] === 'service') {
-  const state = JSON.parse(fs.readFileSync('/var/run/ofm/status.json'));
-  console.log(JSON.stringify({ofm: {instances: {main: {running: true, pid: state.pid}}}}));
+  const state = JSON.parse(fs.readFileSync('/var/run/ourfreemodel/status.json'));
+  console.log(JSON.stringify({ourfreemodel: {instances: {main: {running: true, pid: state.pid}}}}));
 } else console.log(JSON.stringify({up: true, 'ipv4-address': [{address: '127.0.0.1'}]}));
 `, { mode: 0o755 })
-await fs.writeFile('/tmp/ofm-procd-signal.mjs', `import fs from 'node:fs';
-const state = JSON.parse(fs.readFileSync('/var/run/ofm/status.json'));
+await fs.writeFile('/tmp/ourfreemodel-procd-signal.mjs', `import fs from 'node:fs';
+const state = JSON.parse(fs.readFileSync('/var/run/ourfreemodel/status.json'));
 process.kill(state.pid, process.argv[4] === 'HUP' ? 'SIGHUP' : 'SIGTERM');
 `)
 await fs.writeFile('/etc/rc.common', `#!/bin/sh
 initscript="$1"
 action="$2"
 shift 2
-procd_send_signal() { node /tmp/ofm-procd-signal.mjs "$@"; }
+procd_send_signal() { node /tmp/ourfreemodel-procd-signal.mjs "$@"; }
 . "$initscript"
 case "$action" in
   enabled|running) exit 0 ;;
@@ -77,21 +77,21 @@ async function rpc(method, body) {
   return JSON.parse(output)
 }
 
-const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ofm-installed-'))
+const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ourfreemodel-installed-'))
 const apiPort = await freePort()
 let webPort = await freePort()
 while (webPort === apiPort) webPort = await freePort()
 const apiUrl = `http://127.0.0.1:${apiPort}`, webUrl = `http://127.0.0.1:${webPort}`
-const service = spawn(process.execPath, ['/usr/lib/ofm-access/cli.mjs'], {
-  env: { ...process.env, OFM_HOME: dir, OFM_API_PORT: String(apiPort), OFM_WEB_PORT: String(webPort),
-    OFM_API_INTERFACE: 'loopback', OFM_WEB_INTERFACE: 'loopback' }, stdio: ['ignore', 'pipe', 'pipe'],
+const service = spawn(process.execPath, ['/usr/lib/ourfreemodel-access/cli.mjs'], {
+  env: { ...process.env, OURFREEMODEL_HOME: dir, OURFREEMODEL_API_PORT: String(apiPort), OURFREEMODEL_WEB_PORT: String(webPort),
+    OURFREEMODEL_API_INTERFACE: 'loopback', OURFREEMODEL_WEB_INTERFACE: 'loopback' }, stdio: ['ignore', 'pipe', 'pipe'],
 })
 let logs = ''
 service.stdout.on('data', chunk => { logs += chunk })
 service.stderr.on('data', chunk => { logs += chunk })
 const exited = new Promise(resolve => service.once('exit', (code, signal) => resolve({ code, signal })))
-const state = async () => JSON.parse(await fs.readFile('/var/run/ofm/status.json', 'utf8'))
-const login = password => fetch(webUrl + '/ofm-access/login', {
+const state = async () => JSON.parse(await fs.readFile('/var/run/ourfreemodel/status.json', 'utf8'))
+const login = password => fetch(webUrl + '/ourfreemodel-access/login', {
   method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: webUrl },
   body: new URLSearchParams({ password }), redirect: 'manual', signal: AbortSignal.timeout(3000),
 })

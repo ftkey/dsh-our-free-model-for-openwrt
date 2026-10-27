@@ -1,30 +1,33 @@
 #!/bin/sh
 # 为旧版保留配置补齐双端口字段；既有显式选择不被覆盖。
-uci -q get openwrt-ofm.main >/dev/null || uci set openwrt-ofm.main=ofm
-uci -q get openwrt-ofm.main.enabled >/dev/null || uci set openwrt-ofm.main.enabled='1'
-if ! uci -q get openwrt-ofm.main.api_port >/dev/null; then
-  old_port=$(uci -q get openwrt-ofm.main.port)
-  uci set openwrt-ofm.main.api_port="${old_port:-18900}"
+if [ -f /usr/lib/ourfreemodel-access/migrate.mjs ]; then
+  /usr/bin/node /usr/lib/ourfreemodel-access/migrate.mjs || exit 1
+fi
+uci -q get ourfreemodel.main >/dev/null || uci set ourfreemodel.main=ourfreemodel
+uci -q get ourfreemodel.main.enabled >/dev/null || uci set ourfreemodel.main.enabled='1'
+if ! uci -q get ourfreemodel.main.api_port >/dev/null; then
+  old_port=$(uci -q get ourfreemodel.main.port)
+  uci set ourfreemodel.main.api_port="${old_port:-18900}"
 fi
 default_interface=lan
-old_host=$(uci -q get openwrt-ofm.main.host)
+old_host=$(uci -q get ourfreemodel.main.host)
 case "$old_host" in
   127.0.0.1|::1) default_interface=loopback ;;
 esac
 for kind in api web; do
-  uci -q get "openwrt-ofm.main.${kind}_interface" >/dev/null || uci set "openwrt-ofm.main.${kind}_interface=$default_interface"
-  if [ "$default_interface" = loopback ] && ! uci -q get "openwrt-ofm.main.${kind}_address" >/dev/null; then
-    uci set "openwrt-ofm.main.${kind}_address=$old_host"
+  uci -q get "ourfreemodel.main.${kind}_interface" >/dev/null || uci set "ourfreemodel.main.${kind}_interface=$default_interface"
+  if [ "$default_interface" = loopback ] && ! uci -q get "ourfreemodel.main.${kind}_address" >/dev/null; then
+    uci set "ourfreemodel.main.${kind}_address=$old_host"
   fi
 done
-if ! uci -q get openwrt-ofm.main.web_public_origin >/dev/null; then
-  old_origin=$(uci -q get openwrt-ofm.main.public_origin)
-  [ -z "$old_origin" ] || uci set "openwrt-ofm.main.web_public_origin=$old_origin"
+if ! uci -q get ourfreemodel.main.web_public_origin >/dev/null; then
+  old_origin=$(uci -q get ourfreemodel.main.public_origin)
+  [ -z "$old_origin" ] || uci set "ourfreemodel.main.web_public_origin=$old_origin"
 fi
-if ! uci -q get openwrt-ofm.main.web_port >/dev/null; then
+if ! uci -q get ourfreemodel.main.web_port >/dev/null; then
   web_port=18901
-  [ "$(uci -q get openwrt-ofm.main.api_port)" = "$web_port" ] && web_port=18902
-  uci set "openwrt-ofm.main.web_port=$web_port"
+  [ "$(uci -q get ourfreemodel.main.api_port)" = "$web_port" ] && web_port=18902
+  uci set "ourfreemodel.main.web_port=$web_port"
 fi
-uci commit openwrt-ofm
+uci commit ourfreemodel
 exit 0

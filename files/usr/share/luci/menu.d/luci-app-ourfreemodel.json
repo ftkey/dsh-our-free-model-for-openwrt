@@ -3,6 +3,6 @@
     "title": "OurFreeModel",
     "order": 65,
     "action": { "type": "view", "path": "ourfreemodel" },
-    "depends": { "acl": ["luci-app-ourfreemodel"], "uci": { "openwrt-ofm": true } }
+    "depends": { "acl": ["luci-app-ourfreemodel"], "uci": { "ourfreemodel": true } }
   }
 }

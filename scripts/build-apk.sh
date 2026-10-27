@@ -24,7 +24,7 @@ mkdir -p "$PACKAGE_DIR"
 rsync -a --delete "$REPO_ROOT/payload/" "$PACKAGE_DIR/payload/"
 rsync -a --delete "$REPO_ROOT/files/" "$PACKAGE_DIR/files/"
 cp "$REPO_ROOT/Makefile" "$PACKAGE_DIR/Makefile"
-chmod 755 "$PACKAGE_DIR/files/etc/init.d/ofm"
+chmod 755 "$PACKAGE_DIR/files/etc/init.d/ourfreemodel"
 
 cat > "$SDK_ROOT/.config" <<CONFIG
 CONFIG_TARGET_${TARGET}=y

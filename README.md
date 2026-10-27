@@ -17,12 +17,12 @@
 
 ARM64 目标依据 [ER1-WRT-CI 的 ROM 配置](https://github.com/ftkey/ER1-WRT-CI/blob/main/.github/workflows/build-firmware.yml) 选择。ROM 使用 VIKINGYFY/immortalwrt，而此处和参考项目一样使用官方 ImmortalWrt snapshot SDK；两者并非同一构建，安装时仍需核对设备架构、APK 格式和 Node.js 版本。
 
-1. 将**本目录内容**放在新仓库根目录，确保包含隐藏的 `.github/`、根 `Makefile`、`files/` 和 `payload/`。不要将整个 `openwrt-ofm` 嵌套一层上传，也不要上传 `dist/`。
+1. 将**本目录内容**放在新仓库根目录，确保包含隐藏的 `.github/`、根 `Makefile`、`files/` 和 `payload/`。不要将整个项目目录嵌套一层上传，也不要上传 `dist/`。
 2. 推送到 `main` 后先自测，再编译当前已提交快照；也可在 **Actions → Build APK → Run workflow** 手动运行（默认不勾选 `sync_upstream`）。PR 和版本标签同样只构建对应提交。定时运行或手动明确勾选 `sync_upstream` 才同步上游。
 3. 编译完成后下载 Artifacts 中对应平台的 ZIP。每个平台包含 APK、`SHA256SUMS`、`APK-METADATA.txt`、`SDK.config`、SDK 下载校验列表、移植版本信息及源提交 SHA。
 4. 需要发布到 Releases 时，手动运行时勾选 `publish`，或推送 `v*` 标签。普通分支推送只上传 Artifact。无需配置额外 Secret，发布使用仓库内置 `GITHUB_TOKEN`。
 
-APK 使用 SDK 的文件命名规则，例如 `dsh-our-free-model-for-openwrt-2.7.2-r3.apk`，实际版本以 Artifact 为准。载荷是纯 JS，配方使用 `PKGARCH:=all`；仍分别使用两个平台 SDK 处理依赖和验证，产物按平台分开保存。不会打包 Node.js，需要从固件软件源安装。
+APK 使用 SDK 的文件命名规则，例如 `dsh-our-free-model-for-openwrt-2.7.2-r4.apk`，实际版本以 Artifact 为准。载荷是纯 JS，配方使用 `PKGARCH:=all`；仍分别使用两个平台 SDK 处理依赖和验证，产物按平台分开保存。不会打包 Node.js，需要从固件软件源安装。
 
 ## 自动同步上游
 
@@ -56,19 +56,21 @@ apk --print-arch
 
 ```sh
 # 文件名按实际下载结果替换
-apk add --allow-untrusted ./dsh-our-free-model-for-openwrt-2.7.2-r3.apk
-/etc/init.d/ofm enable
-/etc/init.d/ofm start
+apk add --allow-untrusted ./dsh-our-free-model-for-openwrt-2.7.2-r4.apk
+/etc/init.d/ourfreemodel enable
+/etc/init.d/ourfreemodel start
 # 然后在 LuCI → 服务 → OurFreeModel 中设置 WebUI 密码。
 # 也可通过 SSH 交互设置（输入不回显，不会重启模型 API）：
-/etc/init.d/ofm password
-/etc/init.d/ofm status
-logread -e ofm
+/etc/init.d/ourfreemodel password
+/etc/init.d/ourfreemodel status
+logread -e ourfreemodel
 ```
 
 这是独立 SDK 构建的第三方 APK，ROM 默认不信任其签名，因此安装时使用 `--allow-untrusted`。依赖无法满足时先核对 ROM 软件源；不要强制跳过 Node.js 依赖。旧 `mkapk.py` 手工生成的 `dist/*.apk` 不属于 SDK 产物，请重新通过 Actions 编译；该入口现已停用。
 
-服务入口为 `/usr/lib/ofm-access/cli.mjs`。上游运行时只监听本机临时端口；面向用户提供两个独立入口。`/etc/config/openwrt-ofm`、`/etc/ofm-access.json` 均声明为升级保留配置；后者仅保存 WebUI 密码的 scrypt 随机盐和哈希，权限为 `0600`。没有默认管理密码；首次设置之前 WebUI 不启动，API 仍可独立运行。
+服务入口为 `/usr/lib/ourfreemodel-access/cli.mjs`。上游运行时只监听本机临时端口；面向用户提供两个独立入口。`/etc/config/ourfreemodel`、`/etc/ourfreemodel-access.json` 均声明为升级保留配置；后者仅保存 WebUI 密码的 scrypt 随机盐和哈希，权限为 `0600`。没有默认管理密码；首次设置之前 WebUI 不启动，API 仍可独立运行。
+
+服务名称、UCI 配置和安装路径统一使用 `ourfreemodel`：`/etc/init.d/ourfreemodel`、`/etc/config/ourfreemodel`、`/usr/lib/ourfreemodel`。升级时自动迁移旧 `ofm` 服务的配置、WebUI 密码、默认数据目录及开机自启链接；自定义数据目录保持原路径。若新旧默认数据目录同时存在，保留原数据路径，避免覆盖。
 
 ## LuCI 菜单
 
@@ -89,7 +91,7 @@ logread -e ofm
 | 自带 WebUI | `http://<路由器LAN IP>:18901` | WebUI 管理密码 |
 | 模型 API | `http://<路由器LAN IP>:18900/v1` | `Authorization: Bearer <API Key>` |
 
-WebUI 密码保护的是上游自带管理界面（概览、模型清单、用量统计、账号渠道、API 接入、服务设置等）。验证成功后直接进入原 WebUI；管理资源及管理接口同样要求登录。管理会话采用 HttpOnly、SameSite=Strict Cookie，8 小时过期；点击 WebUI 退出会注销会话。连续输错 5 次后，该来源 IP 暂停验证 15 分钟。忘记密码时，从 LuCI 重置，或在 SSH 中执行 `/etc/init.d/ofm password`。
+WebUI 密码保护的是上游自带管理界面（概览、模型清单、用量统计、账号渠道、API 接入、服务设置等）。验证成功后直接进入原 WebUI；管理资源及管理接口同样要求登录。管理会话采用 HttpOnly、SameSite=Strict Cookie，8 小时过期；点击 WebUI 退出会注销会话。连续输错 5 次后，该来源 IP 暂停验证 15 分钟。忘记密码时，从 LuCI 重置，或在 SSH 中执行 `/etc/init.d/ourfreemodel password`。
 
 模型 API **不要求 WebUI 密码、不要求 HTTP Basic、不要求先登录浏览器**，可直接配置到标准 OpenAI 兼容客户端。API Key 在自带 WebUI 的「API 接入」中查看或轮换，轮换后旧 Key 立即失效。API 端口不提供 WebUI 或管理接口，不能用 API Key 登录 WebUI；WebUI 端口也不承担模型转发。示例：
 
@@ -107,13 +109,13 @@ curl -H 'Authorization: Bearer <API Key>' \
 UCI 示例（端口和绑定接口也可直接在 LuCI 修改）：
 
 ```sh
-uci set openwrt-ofm.main.api_port='18900'
-uci set openwrt-ofm.main.api_interface='lan'
-uci set openwrt-ofm.main.web_port='18901'
-uci set openwrt-ofm.main.web_interface='lan'
-uci set openwrt-ofm.main.data_dir='/mnt/ofm'
-uci commit openwrt-ofm
-/etc/init.d/ofm restart
+uci set ourfreemodel.main.api_port='18900'
+uci set ourfreemodel.main.api_interface='lan'
+uci set ourfreemodel.main.web_port='18901'
+uci set ourfreemodel.main.web_interface='lan'
+uci set ourfreemodel.main.data_dir='/mnt/ourfreemodel'
+uci commit ourfreemodel
+/etc/init.d/ourfreemodel restart
 ```
 
 只通过 SSH 使用管理页时，将 `web_interface` 改为 `loopback`，并在电脑上运行 `ssh -L 18901:127.0.0.1:18901 root@<路由器IP>`，然后访问 `http://127.0.0.1:18901`，仍需 WebUI 密码。API 可以继续独立绑定 `lan`。
@@ -127,10 +129,10 @@ scripts/build-apk.sh            SDK 编译、元数据检查及产物收集
 scripts/sync-upstream.sh        检测上游提交、刷新载荷及更新发布号
 build-payload.sh               从上游工作树刷新运行时快照
 payload/                       随仓库提交的运行时及预编译 Web UI
-files/etc/init.d/ofm            procd 启动脚本
-files/etc/config/openwrt-ofm    UCI 配置
-files/etc/ofm-access.json       初始空密码配置（首次安装需设置）
-files/usr/lib/ofm-access/       WebUI 密码、独立 API、接口解析及 LuCI 后端
+files/etc/init.d/ourfreemodel            procd 启动脚本
+files/etc/config/ourfreemodel    UCI 配置
+files/etc/ourfreemodel-access.json       初始空密码配置（首次安装需设置）
+files/usr/lib/ourfreemodel-access/       WebUI 密码、独立 API、接口解析及 LuCI 后端
 files/www/luci-static/          OurFreeModel LuCI 配置页
 files/usr/share/luci/menu.d/    LuCI 菜单注册
 files/usr/share/rpcd/acl.d/     LuCI 读写权限
@@ -167,7 +169,7 @@ bash scripts/build-apk.sh /path/to/sdk ./dist qualcommax ipq60xx
 ```sh
 node --test tests/*.test.mjs
 # 以下仅在一次性 Linux 容器中运行；会写入容器 /usr/lib、/etc。
-docker run --rm --network none -e OFM_CONTAINER_SMOKE=1 \
+docker run --rm --network none -e OURFREEMODEL_CONTAINER_SMOKE=1 \
   --mount "type=bind,src=$PWD,dst=/work,readonly" -w /work \
   node:24-bookworm node scripts/test-installed-runtime.mjs
 ```

@@ -2,14 +2,14 @@ import http from 'node:http'
 import crypto from 'node:crypto'
 import { verifyPassword } from './password.mjs'
 
-const LOGIN = '/ofm-access/login'
+const LOGIN = '/ourfreemodel-access/login'
 const SESSION_MS = 8 * 60 * 60_000
 const CLIENT = `const originalFetch = window.fetch.bind(window);
 window.fetch = async (...args) => {
   const response = await originalFetch(...args);
   const path = new URL(args[0] instanceof Request ? args[0].url : args[0], location.href).pathname;
   if (path.startsWith('/api/management/') && (response.status === 401 || (path === '/api/management/logout' && response.ok))) {
-    location.replace('/ofm-access/login');
+    location.replace('/ourfreemodel-access/login');
   }
   return response;
 };`
@@ -130,11 +130,11 @@ export async function startAccessGateway({ targetUrl, managementKey, credential,
         }
         return json(res, 401, '请先验证 WebUI 管理密码')
       }
-      if (!pathname.startsWith('/api/management/') && !pathname.startsWith('/assets/') && pathname !== '/' && pathname !== '/ofm-access/client.js') {
+      if (!pathname.startsWith('/api/management/') && !pathname.startsWith('/assets/') && pathname !== '/' && pathname !== '/ourfreemodel-access/client.js') {
         return json(res, 404, '此端口仅用于 WebUI，模型请求请使用 API 端口')
       }
       if (pathname === '/api/management/session' || pathname === '/api/management/login/terminal') return json(res, 403, '请使用 WebUI 密码登录页面')
-      if (pathname === '/ofm-access/client.js' && req.method === 'GET') {
+      if (pathname === '/ourfreemodel-access/client.js' && req.method === 'GET') {
         res.writeHead(200, { ...HEADERS, 'content-type': 'text/javascript; charset=utf-8' })
         return res.end(CLIENT)
       }
@@ -185,7 +185,7 @@ export async function startAccessGateway({ targetUrl, managementKey, credential,
           upstream.on('end', () => {
             try {
               let body = Buffer.concat(chunks).toString('utf8')
-              if (page) body = body.replace('<head>', '<head><script src="/ofm-access/client.js"></script>')
+              if (page) body = body.replace('<head>', '<head><script src="/ourfreemodel-access/client.js"></script>')
               else if (app) {
                 body = body.replaceAll('仅监听回环地址', 'WebUI 密码保护').replaceAll('仅回环地址', '按 LuCI 接口配置')
               } else {
@@ -224,7 +224,7 @@ export async function startAccessGateway({ targetUrl, managementKey, credential,
   })
   server.maxHeadersCount = 100
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, host, resolve) })
-  cookieName = `ofm_access_${server.address().port}`
+  cookieName = `ourfreemodel_access_${server.address().port}`
   let closing
   return {
     port: server.address().port,

@@ -27,7 +27,7 @@ function endpointUrl(endpoint) {
 
 return view.extend({
 	load: function() {
-		return Promise.all([uci.load('openwrt-ofm'), network.getNetworks(), callStatus()]);
+		return Promise.all([uci.load('ourfreemodel'), network.getNetworks(), callStatus()]);
 	},
 
 	serviceAction: function(action, ev) {
@@ -90,9 +90,9 @@ return view.extend({
 
 	render: function(data) {
 		var self = this, networks = data[1], status = data[2], writable = L.hasViewPermission();
-		var m = new form.Map('openwrt-ofm', 'OurFreeModel',
+		var m = new form.Map('ourfreemodel', 'OurFreeModel',
 			_('自带 WebUI 使用独立管理密码；模型 API 使用 API Key。两个端口和监听接口分别配置，修改后点击保存并应用。'));
-		var s = m.section(form.NamedSection, 'main', 'ofm', _('基本设置'));
+		var s = m.section(form.NamedSection, 'main', 'ourfreemodel', _('基本设置'));
 		s.addremove = false;
 		s.tab('general', _('服务'));
 		s.tab('api', _('模型 API'));
@@ -100,7 +100,7 @@ return view.extend({
 		var o = s.taboption('general', form.Flag, 'enabled', _('启用服务'));
 		o.default = '1'; o.rmempty = false;
 		o = s.taboption('general', form.Value, 'data_dir', _('数据目录'), _('建议使用持久挂载盘。更换目录不会自动迁移已有账号、密钥和用量记录。'));
-		o.default = '/usr/lib/ofm-data'; o.rmempty = false; o.datatype = 'directory';
+		o.default = '/usr/lib/ourfreemodel-data'; o.rmempty = false; o.datatype = 'directory';
 
 		['api', 'web'].forEach(function(kind) {
 			var label = kind === 'api' ? 'API' : 'WebUI';
@@ -131,7 +131,7 @@ return view.extend({
 		});
 		o = s.taboption('web', form.Value, 'web_public_origin', _('WebUI HTTPS 外部来源（可选）'),
 			_('使用 HTTPS 反向代理时填写 https://域名，不含路径。直连路由器时留空。'));
-		o.placeholder = 'https://ofm.example.com';
+		o.placeholder = 'https://ourfreemodel.example.com';
 		o.validate = function(section, value) {
 			if (!value) return true;
 			try { var url = new URL(value); return url.protocol === 'https:' && url.origin === value || _('请填写不含路径的 HTTPS 来源'); }

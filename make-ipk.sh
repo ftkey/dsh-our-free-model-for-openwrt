@@ -21,16 +21,16 @@ rm -rf "$OUT/tmp-ipk" "$IPK"
 mkdir -p "$OUT/tmp-ipk/control" "$OUT/tmp-ipk/data"
 
 # ---------- data 载荷 ----------
-# 运行时树装到 /usr/lib/ofm/，入口 cli.mjs 保持相对引用（../../src 从
-# /usr/lib/ofm/packages/standalone/ 指向 /usr/lib/ofm/src/）✓
-rsync -a "$PAYLOAD/" "$OUT/tmp-ipk/data/usr/lib/ofm/"
+# 运行时树装到 /usr/lib/ourfreemodel/，入口 cli.mjs 保持相对引用（../../src 从
+# /usr/lib/ourfreemodel/packages/standalone/ 指向 /usr/lib/ourfreemodel/src/）✓
+rsync -a "$PAYLOAD/" "$OUT/tmp-ipk/data/usr/lib/ourfreemodel/"
 mkdir -p "$OUT/tmp-ipk/data/etc/init.d" "$OUT/tmp-ipk/data/etc/config"
-install -m 755 "$HERE/files/etc/init.d/ofm" "$OUT/tmp-ipk/data/etc/init.d/ofm"
-install -m 644 "$HERE/files/etc/config/openwrt-ofm" "$OUT/tmp-ipk/data/etc/config/openwrt-ofm"
+install -m 755 "$HERE/files/etc/init.d/ourfreemodel" "$OUT/tmp-ipk/data/etc/init.d/ourfreemodel"
+install -m 644 "$HERE/files/etc/config/ourfreemodel" "$OUT/tmp-ipk/data/etc/config/ourfreemodel"
 # conffiles 必须精确列出
 mkdir -p "$OUT/tmp-ipk/data/CONTROL"
 cat > "$OUT/tmp-ipk/data/CONTROL/conffiles" <<'EOF'
-/etc/config/openwrt-ofm
+/etc/config/ourfreemodel
 EOF
 
 # ---------- control ----------
@@ -53,7 +53,7 @@ Description: Our Free Model standalone service (dsh-our-free-model port).
  Free-lane LLM gateway with web management UI.
 end
 EOF
-echo "/etc/config/openwrt-ofm" > "$OUT/tmp-ipk/control/CONTROL/conffiles"
+echo "/etc/config/ourfreemodel" > "$OUT/tmp-ipk/control/CONTROL/conffiles"
 
 # opkg 对 ar 成员顺序敏感：debian-binary 必须第一个。
 # macOS 的 ar 会写 __.SYMDEF 索引破坏容器，改用 Python 手工构造经典 ar。

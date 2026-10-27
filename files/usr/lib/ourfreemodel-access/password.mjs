@@ -19,7 +19,7 @@ export async function hashPassword(password) {
 export async function loadCredential(file) {
   const value = JSON.parse(await fs.readFile(file, 'utf8'))
   if (value.algorithm !== 'scrypt' || !/^[a-f0-9]{32}$/.test(value.salt) || !/^[a-f0-9]{64}$/.test(value.hash)) {
-    throw new Error('尚未配置 WebUI 密码，请在 LuCI OurFreeModel 中设置，或运行 /etc/init.d/ofm password')
+    throw new Error('尚未配置 WebUI 密码，请在 LuCI OurFreeModel 中设置，或运行 /etc/init.d/ourfreemodel password')
   }
   return value
 }
@@ -53,7 +53,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const confirmation = await rl.question('')
     process.stdout.write('\n')
     if (password !== confirmation) throw new Error('两次密码不一致，未修改配置')
-    await saveCredential(process.argv[2] ?? '/etc/ofm-access.json', password)
+    await saveCredential(process.argv[2] ?? '/etc/ourfreemodel-access.json', password)
     process.stdout.write('WebUI 管理密码已保存。\n')
   } catch (error) {
     process.stderr.write(`${error.message}\n`)

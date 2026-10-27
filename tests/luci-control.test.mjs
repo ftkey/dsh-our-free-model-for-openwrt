@@ -6,23 +6,23 @@ import os from 'node:os'
 import { spawn } from 'node:child_process'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { resolveBinding, parsePort, httpAddress } from '../files/usr/lib/ofm-access/bind.mjs'
-import { createControl } from '../files/usr/lib/ofm-access/control.mjs'
-import { loadCredential, verifyPassword } from '../files/usr/lib/ofm-access/password.mjs'
+import { resolveBinding, parsePort, httpAddress } from '../files/usr/lib/ourfreemodel-access/bind.mjs'
+import { createControl } from '../files/usr/lib/ourfreemodel-access/control.mjs'
+import { loadCredential, verifyPassword } from '../files/usr/lib/ourfreemodel-access/password.mjs'
 
 const root = new URL('../', import.meta.url)
 const execute = promisify(execFile)
 
 test('真实 init 脚本向 procd 传递双端口和接口，禁用时不启动，注册配置及接口触发器', async t => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ofm-init-'))
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ourfreemodel-init-'))
   t.after(() => fs.rm(dir, { recursive: true, force: true }))
   const harness = path.join(dir, 'harness.sh')
   await fs.writeFile(harness, `config_load() { :; }
-config_get_bool() { export "$1=$OFM_TEST_ENABLED"; }
+config_get_bool() { export "$1=$OURFREEMODEL_TEST_ENABLED"; }
 config_get() {
   local value="$4"
   case "$3" in
-    data_dir) value="$OFM_TEST_DATA" ;;
+    data_dir) value="$OURFREEMODEL_TEST_DATA" ;;
     api_port) value=19000 ;;
     web_port) value=19001 ;;
     api_interface) value=lan ;;
@@ -39,11 +39,11 @@ procd_add_interface_trigger() { printf 'IFACE:%s\\n' "$2"; }
 start_service
 service_triggers
 `)
-  const script = new URL('files/etc/init.d/ofm', root).pathname
-  const env = { ...process.env, OFM_TEST_DATA: path.join(dir, 'data with spaces'), OFM_TEST_ENABLED: '1' }
+  const script = new URL('files/etc/init.d/ourfreemodel', root).pathname
+  const env = { ...process.env, OURFREEMODEL_TEST_DATA: path.join(dir, 'data with spaces'), OURFREEMODEL_TEST_ENABLED: '1' }
   const enabled = (await execute('sh', [harness, script], { env })).stdout
-  for (const value of ['OPEN:main', 'OFM_API_PORT=19000', 'OFM_WEB_PORT=19001', 'OFM_API_INTERFACE=lan', 'OFM_WEB_INTERFACE=loopback', `OFM_HOME=${env.OFM_TEST_DATA}`, 'RELOAD:openwrt-ofm', 'IFACE:lan', 'IFACE:loopback']) assert.ok(enabled.includes(value), value)
-  const disabled = (await execute('sh', [harness, script], { env: { ...env, OFM_TEST_ENABLED: '0' } })).stdout
+  for (const value of ['OPEN:main', 'OURFREEMODEL_API_PORT=19000', 'OURFREEMODEL_WEB_PORT=19001', 'OURFREEMODEL_API_INTERFACE=lan', 'OURFREEMODEL_WEB_INTERFACE=loopback', `OURFREEMODEL_HOME=${env.OURFREEMODEL_TEST_DATA}`, 'RELOAD:ourfreemodel', 'IFACE:lan', 'IFACE:loopback']) assert.ok(enabled.includes(value), value)
+  const disabled = (await execute('sh', [harness, script], { env: { ...env, OURFREEMODEL_TEST_ENABLED: '0' } })).stdout
   assert.ok(!disabled.includes('OPEN:main'))
 })
 
@@ -64,7 +64,7 @@ test('接口绑定自动选取本地地址，显式 IP 必须属于该接口，�
 })
 
 test('LuCI 密码重置只发 WebUI 重载命令；密码和确认值不进入命令参数', async t => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ofm-control-'))
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ourfreemodel-control-'))
   t.after(() => fs.rm(dir, { recursive: true, force: true }))
   const calls = []
   const file = path.join(dir, 'credential.json')
@@ -73,19 +73,19 @@ test('LuCI 密码重置只发 WebUI 重载命令；密码和确认值不进入�
   const result = await control.set_password({ password: 'a-secure-web-password', confirmation: 'a-secure-web-password' })
   assert.equal(result.ok, true)
   assert.equal(await verifyPassword('a-secure-web-password', await loadCredential(file)), true)
-  assert.deepEqual(calls, [{ command: '/etc/init.d/ofm', args: ['reload_password'] }])
+  assert.deepEqual(calls, [{ command: '/etc/init.d/ourfreemodel', args: ['reload_password'] }])
   await assert.rejects(control.service({ action: 'restart; reboot' }), /不支持/)
   assert.equal(calls.length, 1)
 })
 
 test('LuCI 状态识别当前进程并拒绝显示陈旧的监听地址', async t => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ofm-status-'))
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ourfreemodel-status-'))
   t.after(() => fs.rm(dir, { recursive: true, force: true }))
   const stateFile = path.join(dir, 'state.json'), versionFile = path.join(dir, 'version.json')
-  await fs.writeFile(stateFile, JSON.stringify({ pid: 100, api: { running: true, port: 18900 }, web: { running: true, port: 18901 }, dataDir: '/mnt/ofm' }))
+  await fs.writeFile(stateFile, JSON.stringify({ pid: 100, api: { running: true, port: 18900 }, web: { running: true, port: 18901 }, dataDir: '/mnt/ourfreemodel' }))
   await fs.writeFile(versionFile, '{"version":"2.7.2"}')
   let pid = 100
-  const control = createControl({ stateFile, versionFile, credentialFile: path.join(dir, 'missing'), run: async file => ({ stdout: file === '/bin/ubus' ? JSON.stringify({ ofm: { instances: { main: { running: true, pid } } } }) : '' }) })
+  const control = createControl({ stateFile, versionFile, credentialFile: path.join(dir, 'missing'), run: async file => ({ stdout: file === '/bin/ubus' ? JSON.stringify({ ourfreemodel: { instances: { main: { running: true, pid } } } }) : '' }) })
   const state = await control.status()
   assert.equal(state.api.port, 18900)
   assert.equal(state.web.port, 18901)
@@ -100,12 +100,12 @@ test('LuCI 菜单和 ACL 将密码与服务控制限制为写权限，未开放�
   const acl = JSON.parse(await fs.readFile(new URL('files/usr/share/rpcd/acl.d/luci-app-ourfreemodel.json', root)))['luci-app-ourfreemodel']
   assert.deepEqual(acl.read.ubus.ourfreemodel, ['status'])
   assert.deepEqual(acl.write.ubus.ourfreemodel, ['set_password', 'service'])
-  assert.deepEqual(acl.write.uci, ['openwrt-ofm'])
+  assert.deepEqual(acl.write.uci, ['ourfreemodel'])
   assert.equal(acl.write.file, undefined)
 })
 
 test('RPC 读取完整 JSON 后即处理，不等待 rpcd 关闭 stdin，并拒绝命令注入', async t => {
-  const child = spawn(process.execPath, [new URL('files/usr/lib/ofm-access/rpc.mjs', root).pathname, 'call', 'service'], { stdio: ['pipe', 'pipe', 'pipe'] })
+  const child = spawn(process.execPath, [new URL('files/usr/lib/ourfreemodel-access/rpc.mjs', root).pathname, 'call', 'service'], { stdio: ['pipe', 'pipe', 'pipe'] })
   t.after(() => child.kill())
   let output = ''
   child.stdout.on('data', chunk => { output += chunk })
