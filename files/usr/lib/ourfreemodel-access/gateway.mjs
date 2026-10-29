@@ -71,7 +71,12 @@ export async function startAccessGateway({ targetUrl, managementKey, credential,
     try {
       const own = origin(req)
       const keys = navigation ? [] : ['origin', 'referer']
-      return keys.every(key => req.headers[key] === undefined || new URL(req.headers[key]).origin === own)
+      return keys.every(key => {
+        const value = req.headers[key]
+        // 沙箱页面或 IDE 内置浏览器的 Origin 会被序列化成 "null"，此时忽略该头；
+        // 跨站写操作仍由 Sec-Fetch-Site 与 SameSite=Strict 会话 Cookie 拦截。
+        return !value || value === 'null' || new URL(value).origin === own
+      })
     } catch { return false }
   }
   const check = async (password, req, res, html = false) => {

@@ -122,12 +122,23 @@ test('顶层页面浏览允许来自其他页面的 Referer，跨站写操作仍
 test('跨站请求、伪造代理来源、超大表单和连续猜测被拒绝', async t => {
   let at = Date.now()
   const { call, login } = await fixture(t, { now: () => at })
-  assert.equal((await call('/ourfreemodel-access/login', { headers: { origin: 'http://evil.test', 'x-forwarded-host': 'evil.test' } })).status, 403)
+  // 内置浏览器把 Origin 序列化为 "null"，应允许登录，否则永远无法进入 WebUI。
+  assert.equal((await call('/ourfreemodel-access/login', {
+    method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: 'null' },
+    body: new URLSearchParams({ password }),
+  })).status, 303)
+  assert.equal((await call('/ourfreemodel-access/login', { headers: { origin: 'null' } })).status, 200)
   // 只是打开登录页：即使被浏览器标为 cross-site 也允许，避免从 LuCI/内置浏览器跳转时看到 JSON 报错。
   assert.equal((await call('/ourfreemodel-access/login', { headers: { 'sec-fetch-site': 'cross-site' } })).status, 200)
   // 跨站提交密码表单仍然拒绝。
   assert.equal((await call('/ourfreemodel-access/login', {
     method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', 'sec-fetch-site': 'cross-site' },
+    body: new URLSearchParams({ password }),
+  })).status, 403)
+  // 明确的跨站来源仍然拒绝（含伪造代理来源头）。
+  assert.equal((await call('/ourfreemodel-access/login', { headers: { origin: 'http://evil.test', 'x-forwarded-host': 'evil.test' } })).status, 403)
+  assert.equal((await call('/ourfreemodel-access/login', {
+    method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: 'http://evil.test' },
     body: new URLSearchParams({ password }),
   })).status, 403)
   assert.equal((await call('/ourfreemodel-access/login', {
