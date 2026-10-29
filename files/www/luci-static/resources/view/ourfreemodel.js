@@ -10,6 +10,25 @@
 var callStatus = rpc.declare({ object: 'ourfreemodel', method: 'status', expect: { '': {} }, reject: true });
 var callService = rpc.declare({ object: 'ourfreemodel', method: 'service', params: ['action'], expect: { '': {} }, reject: true });
 var callPassword = rpc.declare({ object: 'ourfreemodel', method: 'set_password', params: ['password', 'confirmation'], expect: { '': {} }, reject: true });
+var callSecret = rpc.declare({ object: 'ourfreemodel', method: 'password', expect: { '': {} }, reject: true });
+var callRandom = rpc.declare({ object: 'ourfreemodel', method: 'reset_password', expect: { '': {} }, reject: true });
+
+function copyText(text) {
+	if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text);
+	return Promise.resolve().then(function() {
+		var area = document.createElement('textarea');
+		area.value = text;
+		area.setAttribute('readonly', '');
+		area.style.position = 'fixed';
+		area.style.top = '-1000px';
+		document.body.appendChild(area);
+		area.select();
+		var copied = false;
+		try { copied = document.execCommand('copy'); } catch (e) {}
+		document.body.removeChild(area);
+		if (!copied) throw new Error(_('复制失败，请手动选中密码文本复制'));
+	});
+}
 
 function addresses(net) {
 	return [].concat(net.getIPAddrs ? net.getIPAddrs() : [], net.getIP6Addrs ? net.getIP6Addrs() : []).map(function(ip) { return ip.split('/')[0]; });
@@ -27,7 +46,16 @@ function endpointUrl(endpoint) {
 
 return view.extend({
 	load: function() {
-		return Promise.all([uci.load('ourfreemodel'), network.getNetworks(), callStatus()]);
+		var self = this;
+		return Promise.all([
+			uci.load('ourfreemodel'),
+			network.getNetworks(),
+			callStatus(),
+			callSecret().catch(function() { return {}; })
+		]).then(function(data) {
+			self.secret = (data[3] && data[3].password) || '';
+			return [data[0], data[1], data[2]];
+		});
 	},
 
 	serviceAction: function(action, ev) {
@@ -70,15 +98,61 @@ return view.extend({
 		]);
 	},
 
+	refreshStatus: function() {
+		var self = this;
+		if (!this.statusNode) return Promise.resolve();
+		return callStatus().then(function(next) { self.drawStatus(self.statusNode, next); });
+	},
+
+	copyPassword: function() {
+		if (!this.secret) return Promise.reject(new Error(_('没有可复制的密码，请先重置为随机密码')));
+		return copyText(this.secret).then(function() {
+			ui.addNotification(null, E('p', {}, _('WebUI 密码已复制到剪贴板。')), 'info');
+		}).catch(function(error) {
+			ui.addNotification(null, E('p', {}, error.message), 'error');
+		});
+	},
+
+	resetRandomPassword: function(ev) {
+		var submit = E('button', { 'class': 'btn cbi-button cbi-button-negative' }, _('生成并应用'));
+		var self = this;
+		submit.addEventListener('click', function() {
+			submit.disabled = true;
+			return callRandom().then(function(result) {
+				if (!result.ok) throw new Error(result.error || _('生成失败'));
+				self.secret = result.password || '';
+				ui.hideModal();
+				void self.refreshStatus();
+				ui.addNotification(null, E('p', {}, [_('已生成新的随机 WebUI 密码：'), E('code', {}, self.secret)]), 'info');
+			}).catch(function(error) {
+				ui.addNotification(null, E('p', {}, error.message), 'error');
+			}).finally(function() { submit.disabled = false; });
+		});
+		ui.showModal(_('重置为随机密码'), [
+			E('p', {}, _('将立即生成一个 16 位随机密码，可在状态表中查看并复制。重置会注销所有 WebUI 会话，不会更换 API Key 或中断模型 API。')),
+			E('div', { 'class': 'right' }, [
+				E('button', { 'class': 'btn', click: function() { ui.hideModal(); } }, _('取消')),
+				' ', submit
+			])
+		]);
+	},
+
 	drawStatus: function(node, status) {
-		var api = endpointUrl(status.api), web = endpointUrl(status.web);
+		var api = endpointUrl(status.api), web = endpointUrl(status.web), self = this;
+		var passwordCell;
+		if (!status.passwordSet) passwordCell = _('尚未设置，首次启动会自动生成随机密码');
+		else if (this.secret) passwordCell = E('span', {}, [
+			E('code', {}, this.secret), ' ',
+			E('button', { 'class': 'btn cbi-button cbi-button-small', click: function() { self.copyPassword(); } }, _('复制'))
+		]);
+		else passwordCell = _('已设置（未保存明文；点下方“重置为随机密码”可生成可复制的密码）');
 		var row = function(label, value) { return E('tr', {}, [E('td', { style: 'width:35%' }, label), E('td', {}, value || '—')]); };
 		var errors = [status.error, status.api && status.api.error, status.web && status.web.error].filter(Boolean);
 		var rows = [
 			row(_('服务状态'), status.running ? _('运行中') : _('已停止')),
 			row(_('开机自启'), status.autostart ? _('已启用') : _('未启用')),
 			row(_('版本 / Node.js'), (status.version || '—') + ' / ' + (status.nodeVersion || '—')),
-			row(_('WebUI 管理密码'), status.passwordSet ? _('已设置') : _('尚未设置，请先设置密码')),
+			row(_('WebUI 管理密码'), passwordCell),
 			row(_('WebUI 地址'), web ? E('a', { href: web, target: '_blank', rel: 'noopener noreferrer' }, _('打开自带 WebUI') + ' · ' + web) : _('未启动')),
 			row(_('模型 API Base URL'), api ? E('code', {}, api + '/v1') : _('未启动')),
 			row(_('API 鉴权'), _('Bearer API Key（与 WebUI 密码独立）')),
@@ -138,12 +212,14 @@ return view.extend({
 			catch (e) { return _('请填写有效 HTTPS 来源'); }
 		};
 		var statusNode = E('div');
+		this.statusNode = statusNode;
 		this.drawStatus(statusNode, status);
 		poll.add(function() { return callStatus().then(function(next) { self.drawStatus(statusNode, next); }); }, 5);
 		var buttons = [['start', _('启动')], ['stop', _('停止')], ['restart', _('重启')], ['enable', _('开机自启')], ['disable', _('取消自启')]].map(function(item) {
 			return E('button', { 'class': 'btn cbi-button', disabled: !writable, click: ui.createHandlerFn(self, 'serviceAction', item[0]) }, item[1]);
 		});
-		buttons.push(E('button', { 'class': 'btn cbi-button cbi-button-action', disabled: !writable, click: ui.createHandlerFn(this, 'resetPassword') }, _('设置 / 重置 WebUI 密码')));
+		buttons.push(E('button', { 'class': 'btn cbi-button cbi-button-action', disabled: !writable, click: ui.createHandlerFn(this, 'resetRandomPassword') }, _('重置为随机密码')));
+		buttons.push(E('button', { 'class': 'btn cbi-button', disabled: !writable, click: ui.createHandlerFn(this, 'resetPassword') }, _('手动设置 WebUI 密码')));
 		return m.render().then(function(map) {
 			return E('div', {}, [E('h2', {}, 'OurFreeModel'), statusNode, E('div', { 'class': 'cbi-page-actions' }, buttons), map]);
 		});

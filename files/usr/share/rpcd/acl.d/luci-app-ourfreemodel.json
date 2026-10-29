@@ -1,13 +1,13 @@
 {
   "luci-app-ourfreemodel": {
-    "description": "Configure OurFreeModel and reset its WebUI password",
+    "description": "Configure OurFreeModel, read its initial WebUI password and reset it",
     "read": {
       "uci": ["ourfreemodel", "network"],
       "ubus": { "ourfreemodel": ["status"], "network.interface": ["dump"], "network.device": ["status"], "luci-rpc": ["getNetworkDevices"] }
     },
     "write": {
       "uci": ["ourfreemodel"],
-      "ubus": { "ourfreemodel": ["set_password", "service"] }
+      "ubus": { "ourfreemodel": ["password", "reset_password", "set_password", "service"] }
     }
   }
 }

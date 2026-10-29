@@ -8,7 +8,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { resolveBinding, parsePort, httpAddress } from '../files/usr/lib/ourfreemodel-access/bind.mjs'
 import { createControl } from '../files/usr/lib/ourfreemodel-access/control.mjs'
-import { loadCredential, verifyPassword } from '../files/usr/lib/ourfreemodel-access/password.mjs'
+import { ensureCredential, loadCredential, verifyPassword } from '../files/usr/lib/ourfreemodel-access/password.mjs'
 
 const root = new URL('../', import.meta.url)
 const execute = promisify(execFile)
@@ -67,15 +67,40 @@ test('LuCI 密码重置只发 WebUI 重载命令；密码和确认值不进入�
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ourfreemodel-control-'))
   t.after(() => fs.rm(dir, { recursive: true, force: true }))
   const calls = []
-  const file = path.join(dir, 'credential.json')
-  const control = createControl({ credentialFile: file, run: async (command, args) => { calls.push({ command, args }); return { stdout: '' } } })
+  const file = path.join(dir, 'credential.json'), secretFile = path.join(dir, 'secret')
+  const control = createControl({ credentialFile: file, secretFile, run: async (command, args) => { calls.push({ command, args }); return { stdout: '' } } })
   await assert.rejects(control.set_password({ password: 'a-secure-web-password', confirmation: 'different' }), /不一致/)
   const result = await control.set_password({ password: 'a-secure-web-password', confirmation: 'a-secure-web-password' })
   assert.equal(result.ok, true)
   assert.equal(await verifyPassword('a-secure-web-password', await loadCredential(file)), true)
+  // 手动设置的密码不保留明文副本，LuCI 不再显示（可能已失效的）旧随机密码。
+  assert.equal((await control.password()).password, '')
   assert.deepEqual(calls, [{ command: '/etc/init.d/ourfreemodel', args: ['reload_password'] }])
   await assert.rejects(control.service({ action: 'restart; reboot' }), /不支持/)
   assert.equal(calls.length, 1)
+})
+
+test('首次初始化生成 16 位随机密码，LuCI 可读取，重置后旧密码立即失效', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ourfreemodel-random-'))
+  t.after(() => fs.rm(dir, { recursive: true, force: true }))
+  const credentialFile = path.join(dir, 'credential.json'), secretFile = path.join(dir, 'secret')
+  const first = await ensureCredential({ credentialFile, secretFile })
+  assert.equal(first.created, true)
+  assert.match(first.password, /^[abcdefghjkmnpqrstuvwxyz23456789]{16}$/)
+  assert.equal(await verifyPassword(first.password, await loadCredential(credentialFile)), true)
+  // 再次初始化不覆盖已有密码
+  assert.equal((await ensureCredential({ credentialFile, secretFile })).created, false)
+  const control = createControl({ credentialFile, secretFile, run: async () => ({ stdout: '' }) })
+  assert.equal((await control.password()).password, first.password)
+  const reset = await control.reset_password()
+  assert.notEqual(reset.password, first.password)
+  assert.equal((await control.password()).password, reset.password)
+  assert.equal(await verifyPassword(reset.password, await loadCredential(credentialFile)), true)
+  assert.equal(await verifyPassword(first.password, await loadCredential(credentialFile)), false)
+  // 手动设置后明文副本被清除
+  await control.set_password({ password: 'a-secure-web-password', confirmation: 'a-secure-web-password' })
+  assert.equal((await control.password()).password, '')
+  assert.equal((await control.status()).passwordVisible, false)
 })
 
 test('LuCI 状态识别当前进程并拒绝显示陈旧的监听地址', async t => {
@@ -99,7 +124,7 @@ test('LuCI 菜单和 ACL 将密码与服务控制限制为写权限，未开放�
   assert.equal(menu['admin/services/ourfreemodel'].title, 'OurFreeModel')
   const acl = JSON.parse(await fs.readFile(new URL('files/usr/share/rpcd/acl.d/luci-app-ourfreemodel.json', root)))['luci-app-ourfreemodel']
   assert.deepEqual(acl.read.ubus.ourfreemodel, ['status'])
-  assert.deepEqual(acl.write.ubus.ourfreemodel, ['set_password', 'service'])
+  assert.deepEqual(acl.write.ubus.ourfreemodel, ['password', 'reset_password', 'set_password', 'service'])
   assert.deepEqual(acl.write.uci, ['ourfreemodel'])
   assert.equal(acl.write.file, undefined)
 })

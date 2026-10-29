@@ -105,6 +105,20 @@ test('正确密码建立 HttpOnly 会话并自动登录管理页，退出后旧�
   assert.equal((await call('/api/management/summary', { headers })).status, 401)
 })
 
+test('顶层页面浏览允许来自其他页面的 Referer，跨站写操作仍被拒绝', async t => {
+  const { call, login } = await fixture(t)
+  // 例如从 LuCI（80 端口）或其他站点点链接进入：Referer 属于外部来源，但只是打开登录页，不应报跨站错误。
+  assert.equal((await call('/ourfreemodel-access/login', { headers: { referer: 'http://192.168.8.1/cgi-bin/luci/admin/services/ourfreemodel' } })).status, 200)
+  assert.match(await (await call('/ourfreemodel-access/login', { headers: { referer: 'https://example.com/' } })).text(), /type="password"/)
+  // 登录 POST 携带外部 Origin 时仍然拒绝，避免跨站提交。
+  const forged = await call('/ourfreemodel-access/login', {
+    method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: 'https://example.com' },
+    body: new URLSearchParams({ password }),
+  })
+  assert.equal(forged.status, 403)
+  assert.equal((await login(password)).status, 303)
+})
+
 test('跨站请求、伪造代理来源、超大表单和连续猜测被拒绝', async t => {
   let at = Date.now()
   const { call, login } = await fixture(t, { now: () => at })

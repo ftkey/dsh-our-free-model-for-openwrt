@@ -30,4 +30,8 @@ if ! uci -q get ourfreemodel.main.web_port >/dev/null; then
   uci set "ourfreemodel.main.web_port=$web_port"
 fi
 uci commit ourfreemodel
+# 首次安装即生成随机 WebUI 密码，LuCI 可直接查看并复制。
+if [ -f /usr/lib/ourfreemodel-access/password.mjs ] && [ -x /usr/bin/node ]; then
+  /usr/bin/node /usr/lib/ourfreemodel-access/password.mjs generate || exit 1
+fi
 exit 0

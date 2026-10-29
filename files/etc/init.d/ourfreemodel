@@ -6,11 +6,19 @@ STOP=15
 EXTRA_COMMANDS="password reload_password"
 EXTRA_HELP="	password 设置或重置 WebUI 密码，不中断模型 API"
 
+# 首次启动时生成随机 WebUI 密码；已有密码不会改动。明文仅供 LuCI 查看复制。
+ensure_password() {
+  [ -f /usr/lib/ourfreemodel-access/password.mjs ] || return 0
+  /usr/bin/node /usr/lib/ourfreemodel-access/password.mjs generate >/dev/null 2>&1 || \
+    logger -t ourfreemodel 'WebUI 随机密码初始化失败，请检查 node 与 /etc 写入权限'
+}
+
 start_service() {
   config_load ourfreemodel
   local enabled data_dir api_port api_interface api_address web_port web_interface web_address web_public_origin
   config_get_bool enabled main enabled 1
   [ "$enabled" = 1 ] || return 0
+  ensure_password
   config_get data_dir main data_dir /usr/lib/ourfreemodel-data
   config_get api_port main api_port 18900
   config_get api_interface main api_interface lan

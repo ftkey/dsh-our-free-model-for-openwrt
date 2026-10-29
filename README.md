@@ -60,7 +60,7 @@ apk --print-arch
 apk add --allow-untrusted ./dsh-our-free-model-for-openwrt-2.7.2-r4.apk
 /etc/init.d/ourfreemodel enable
 /etc/init.d/ourfreemodel start
-# 然后在 LuCI → 服务 → OurFreeModel 中设置 WebUI 密码。
+# 首次安装会自动生成 16 位随机 WebUI 密码，在 LuCI → 服务 → OurFreeModel 中查看并复制。
 # 也可通过 SSH 交互设置（输入不回显，不会重启模型 API）：
 /etc/init.d/ourfreemodel password
 /etc/init.d/ourfreemodel status
@@ -78,7 +78,7 @@ opkg install ./dsh-our-free-model-for-openwrt_2.7.2-r4_all.ipk
 
 这是独立 SDK 构建的第三方 APK，ROM 默认不信任其签名，因此安装时使用 `--allow-untrusted`。依赖无法满足时先核对 ROM 软件源；不要强制跳过 Node.js 依赖。旧 `mkapk.py` 手工生成的 `dist/*.apk` 不属于 SDK 产物，请重新通过 Actions 编译；该入口现已停用。
 
-服务入口为 `/usr/lib/ourfreemodel-access/cli.mjs`。上游运行时只监听本机临时端口；面向用户提供两个独立入口。`/etc/config/ourfreemodel`、`/etc/ourfreemodel-access.json` 均声明为升级保留配置；后者仅保存 WebUI 密码的 scrypt 随机盐和哈希，权限为 `0600`。没有默认管理密码；首次设置之前 WebUI 不启动，API 仍可独立运行。
+服务入口为 `/usr/lib/ourfreemodel-access/cli.mjs`。上游运行时只监听本机临时端口；面向用户提供两个独立入口。`/etc/config/ourfreemodel`、`/etc/ourfreemodel-access.json` 声明为升级保留配置，均不含明文密码。`/etc/ourfreemodel-access.json` 保存 WebUI 密码的 scrypt 随机盐和哈希；密码由随机生成时，另一份明文保存在 `/etc/ourfreemodel-webui-secret`（`0600`，仅 root 可读），供 LuCI 显示和复制，手动设置密码时会删除该文件。首次安装或密码文件缺失时自动生成 16 位随机密码，因此 WebUI 开箱即可登录；API 始终独立运行，不依赖 WebUI 密码。
 
 服务名称、UCI 配置和安装路径统一使用 `ourfreemodel`：`/etc/init.d/ourfreemodel`、`/etc/config/ourfreemodel`、`/usr/lib/ourfreemodel`。升级时自动迁移旧 `ofm` 服务的配置、WebUI 密码、默认数据目录及开机自启链接；自定义数据目录保持原路径。若新旧默认数据目录同时存在，保留原数据路径，避免覆盖。
 
@@ -86,9 +86,9 @@ opkg install ./dsh-our-free-model-for-openwrt_2.7.2-r4_all.ipk
 
 安装后进入 **服务 → OurFreeModel**。LuCI 菜单和页面布局采用 [OpenWrt 官方应用示例](https://github.com/openwrt/luci/tree/master/applications/luci-app-example) 的菜单、JavaScript 视图和 ACL 结构。本包依赖 `luci-base`、`rpcd` 和 `rpcd-mod-luci`，安装时会刷新 RPC 服务和 LuCI 菜单缓存。菜单提供：
 
-- 运行状态、版本、Node.js 版本、数据目录、WebUI 链接和实际 API Base URL。
+- 运行状态、版本、Node.js 版本、数据目录、WebUI 链接和实际 API Base URL；状态表中直接显示当前随机 WebUI 密码并提供「复制」按钮。
 - 启动、停止、重启、启用/关闭开机自启，以及总服务启用开关。
-- 设置或重置 **WebUI 管理密码**。密码不会写入明文 UCI，也不会出现在命令参数中。重置注销旧管理会话，只重新加载 WebUI，不重启模型 API、不更换 API Key。
+- 「重置为随机密码」一键生成新的 16 位随机密码并显示在状态表中；「手动设置 WebUI 密码」用于自定义密码。密码不会写入明文 UCI，也不会出现在命令参数中。重置注销旧管理会话，只重新加载 WebUI，不重启模型 API、不更换 API Key。
 - 分别配置 **API 端口、WebUI 端口**，以及两个入口各自的逻辑网络接口和本地 IP。
 - 数据目录和 WebUI HTTPS 反向代理来源配置。更改数据目录不会自动迁移原目录内容。
 
@@ -101,7 +101,7 @@ opkg install ./dsh-our-free-model-for-openwrt_2.7.2-r4_all.ipk
 | 自带 WebUI | `http://<路由器LAN IP>:18901` | WebUI 管理密码 |
 | 模型 API | `http://<路由器LAN IP>:18900/v1` | `Authorization: Bearer <API Key>` |
 
-WebUI 密码保护的是上游自带管理界面（概览、模型清单、用量统计、账号渠道、API 接入、服务设置等）。验证成功后直接进入原 WebUI；管理资源及管理接口同样要求登录。管理会话采用 HttpOnly、SameSite=Strict Cookie，8 小时过期；点击 WebUI 退出会注销会话。连续输错 5 次后，该来源 IP 暂停验证 15 分钟。忘记密码时，从 LuCI 重置，或在 SSH 中执行 `/etc/init.d/ourfreemodel password`。
+WebUI 密码保护的是上游自带管理界面（概览、模型清单、用量统计、账号渠道、API 接入、服务设置等）。首次安装会生成 16 位随机密码并显示在 LuCI 状态表中，点「复制」即可用于登录。验证成功后直接进入原 WebUI；管理资源及管理接口同样要求登录。管理会话采用 HttpOnly、SameSite=Strict Cookie，8 小时过期；点击 WebUI 退出会注销会话。连续输错 5 次后，该来源 IP 暂停验证 15 分钟。忘记密码时，在 LuCI 点「重置为随机密码」查看新密码，或在 SSH 中执行 `/etc/init.d/ourfreemodel password` 手动设置。
 
 模型 API **不要求 WebUI 密码、不要求 HTTP Basic、不要求先登录浏览器**，可直接配置到标准 OpenAI 兼容客户端。API Key 在自带 WebUI 的「API 接入」中查看或轮换，轮换后旧 Key 立即失效。API 端口不提供 WebUI 或管理接口，不能用 API Key 登录 WebUI；WebUI 端口也不承担模型转发。示例：
 
@@ -143,7 +143,7 @@ build-payload.sh               从上游工作树刷新运行时快照
 payload/                       随仓库提交的运行时及预编译 Web UI
 files/etc/init.d/ourfreemodel            procd 启动脚本
 files/etc/config/ourfreemodel    UCI 配置
-files/etc/ourfreemodel-access.json       初始空密码配置（首次安装需设置）
+files/etc/ourfreemodel-access.json       密码哈希占位（首次启动写入随机密码的 scrypt 哈希）
 files/usr/lib/ourfreemodel-access/       WebUI 密码、独立 API、接口解析及 LuCI 后端
 files/www/luci-static/          OurFreeModel LuCI 配置页
 files/usr/share/luci/menu.d/    LuCI 菜单注册
