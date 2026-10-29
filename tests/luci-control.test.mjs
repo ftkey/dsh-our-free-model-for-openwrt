@@ -177,8 +177,10 @@ test('LuCI 视图呈现两个端口、接口选择和密码重置，校验端口
     { extend: object => object }, { Map, NamedSection: 'section', Value: 'input', Flag: 'flag', ListValue: 'list' }, {}, rpc, {}, ui, poll, L, E, value => value)
   const networks = [{ getName: () => 'lan', getIPAddrs: () => ['192.168.8.1/24'], getIP6Addrs: () => [] }]
   const container = await view.render([null, networks, { running: true, api: {}, web: {} }])
-  assert.equal(container.children[1].children, '操作', '操作栏标题应为“操作”')
-  const actions = container.children[2].children
+  const actionsSection = container.children[0]
+  assert.equal(actionsSection.children[0].children, '操作', '操作栏标题应为“操作”')
+  const actions = actionsSection.children[1].children
+  assert.match(actionsSection.children[1].attributes.style, /flex-wrap:wrap/, '操作按钮必须换行排列，避免窄屏溢出')
   const texts = actions.map(button => button.children)
   // 运行中只显示“停止”，不显示“启动”，两者互斥。
   assert.ok(texts.includes('停止') && !texts.includes('启动'))

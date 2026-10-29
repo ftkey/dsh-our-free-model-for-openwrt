@@ -117,8 +117,8 @@ return view.extend({
 		var buttons = actions.map(function(item) {
 			return E('button', { 'class': 'btn cbi-button' + (item[2] ? ' ' + item[2] : ''), click: ui.createHandlerFn(self, 'serviceAction', item[0]) }, item[1]);
 		});
-		buttons.push(E('button', { 'class': 'btn cbi-button cbi-button-action', click: ui.createHandlerFn(this, 'resetRandomPassword') }, _('重置为随机密码')));
-		buttons.push(E('button', { 'class': 'btn cbi-button', click: ui.createHandlerFn(this, 'resetPassword') }, _('手动设置 WebUI 密码')));
+		buttons.push(E('button', { 'class': 'btn cbi-button cbi-button-action', click: ui.createHandlerFn(this, 'resetRandomPassword') }, _('重置密码')));
+		buttons.push(E('button', { 'class': 'btn cbi-button', click: ui.createHandlerFn(this, 'resetPassword') }, _('设置密码')));
 		L.dom.content(node, buttons);
 	},
 
@@ -177,7 +177,7 @@ return view.extend({
 			row(_('数据目录'), status.dataDir)
 		];
 		if (errors.length) rows.push(row(_('运行提示'), E('span', { style: 'color:#b45309' }, errors.join('；'))));
-		L.dom.content(node, E('table', { 'class': 'table' }, rows));
+		L.dom.content(node, E('table', { 'class': 'table', style: 'table-layout:fixed;width:100%;word-break:break-word' }, rows));
 	},
 
 	render: function(data) {
@@ -233,12 +233,17 @@ return view.extend({
 		var statusNode = E('div');
 		this.statusNode = statusNode;
 		this.drawStatus(statusNode, status);
-		var actionsNode = E('div', { 'class': 'cbi-page-actions' });
+		// 不用 cbi-page-actions：它是底部吸底样式（负外边距 + sticky），窄屏会溢出并压住下方文字。
+		var actionsNode = E('div', { 'class': 'ourfreemodel-actions', style: 'display:flex;flex-wrap:wrap;gap:.5em;align-items:center;padding:.25em 1em 1em' });
 		this.actionsNode = actionsNode;
 		this.drawActions(actionsNode, status);
 		poll.add(function() { return self.refreshStatus(); }, 5);
 		return m.render().then(function(map) {
-			return E('div', {}, [statusNode, E('h2', {}, _('操作')), actionsNode, map]);
+			return E('div', {}, [
+				E('div', { 'class': 'cbi-section' }, [E('h2', {}, _('操作')), actionsNode]),
+				statusNode,
+				map
+			]);
 		});
 	}
 });
