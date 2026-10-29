@@ -58,16 +58,15 @@ return view.extend({
 		});
 	},
 
-	// ui.createHandlerFn 会先传事件对象，再追加绑定的参数，因此顺序必须是 (ev, action)。
-	serviceAction: function(ev, action) {
-		var button = ev && ev.currentTarget;
-		if (button) button.disabled = true;
+	// LuCI 的 ui.createHandlerFn 把绑定参数放在前面、事件对象放在最后：fn(arg1, ..., ev)，
+	// 且 LuCI 已代管点击期间的按钮禁用与 spinning 状态，这里不需要再处理按钮。
+	serviceAction: function(action, ev) {
 		return callService(action).then(function(result) {
 			if (!result.ok) throw new Error(result.error || _('操作失败'));
 			ui.addNotification(null, E('p', _('操作已提交，请等待服务状态更新。')), 'info');
 		}).catch(function(error) {
 			ui.addNotification(null, E('p', {}, error.message), 'error');
-		}).finally(function() { if (button) button.disabled = false; });
+		});
 	},
 
 	resetPassword: function() {
@@ -102,7 +101,25 @@ return view.extend({
 	refreshStatus: function() {
 		var self = this;
 		if (!this.statusNode) return Promise.resolve();
-		return callStatus().then(function(next) { self.drawStatus(self.statusNode, next); });
+		return callStatus().then(function(next) {
+			self.drawStatus(self.statusNode, next);
+			if (self.actionsNode) self.drawActions(self.actionsNode, next);
+		});
+	},
+
+	// 启动与停止互斥、开机自启与取消自启互斥：只显示当前可执行的那一组。
+	drawActions: function(node, status) {
+		var self = this;
+		var actions = status.running
+			? [['stop', _('停止')], ['restart', _('重启')]]
+			: [['start', _('启动'), 'cbi-button-positive']];
+		actions.push(status.autostart ? ['disable', _('取消开机自启')] : ['enable', _('开机自启')]);
+		var buttons = actions.map(function(item) {
+			return E('button', { 'class': 'btn cbi-button' + (item[2] ? ' ' + item[2] : ''), click: ui.createHandlerFn(self, 'serviceAction', item[0]) }, item[1]);
+		});
+		buttons.push(E('button', { 'class': 'btn cbi-button cbi-button-action', click: ui.createHandlerFn(this, 'resetRandomPassword') }, _('重置为随机密码')));
+		buttons.push(E('button', { 'class': 'btn cbi-button', click: ui.createHandlerFn(this, 'resetPassword') }, _('手动设置 WebUI 密码')));
+		L.dom.content(node, buttons);
 	},
 
 	copyPassword: function() {
@@ -216,14 +233,12 @@ return view.extend({
 		var statusNode = E('div');
 		this.statusNode = statusNode;
 		this.drawStatus(statusNode, status);
-		poll.add(function() { return callStatus().then(function(next) { self.drawStatus(statusNode, next); }); }, 5);
-		var buttons = [['start', _('启动')], ['stop', _('停止')], ['restart', _('重启')], ['enable', _('开机自启')], ['disable', _('取消自启')]].map(function(item) {
-			return E('button', { 'class': 'btn cbi-button', click: ui.createHandlerFn(self, 'serviceAction', item[0]) }, item[1]);
-		});
-		buttons.push(E('button', { 'class': 'btn cbi-button cbi-button-action', click: ui.createHandlerFn(this, 'resetRandomPassword') }, _('重置为随机密码')));
-		buttons.push(E('button', { 'class': 'btn cbi-button', click: ui.createHandlerFn(this, 'resetPassword') }, _('手动设置 WebUI 密码')));
+		var actionsNode = E('div', { 'class': 'cbi-page-actions' });
+		this.actionsNode = actionsNode;
+		this.drawActions(actionsNode, status);
+		poll.add(function() { return self.refreshStatus(); }, 5);
 		return m.render().then(function(map) {
-			return E('div', {}, [E('h2', {}, 'OurFreeModel'), statusNode, E('div', { 'class': 'cbi-page-actions' }, buttons), map]);
+			return E('div', {}, [statusNode, E('h2', {}, _('操作')), actionsNode, map]);
 		});
 	}
 });

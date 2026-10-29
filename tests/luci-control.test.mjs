@@ -162,21 +162,27 @@ test('LuCI 视图呈现两个端口、接口选择和密码重置，校验端口
   const L = { hasViewPermission: () => true, dom: { content: (node, child) => { node.children = child } } }
   const rpcCalls = []
   const rpc = { declare: () => async (...args) => { rpcCalls.push(args); return {} } }
-  // 与 LuCI 一致：createHandlerFn 先传事件对象，再追加绑定参数。
+  // 与路由器上 LuCI 真实实现一致：createHandlerFn 把绑定参数放在前面，浏览器事件对象追加在最后。
   const ui = {
     createHandlerFn(target, method, ...args) {
-      return function(ev) { return Promise.resolve(target[method](ev, ...args)) }
+      const fn = target[method]
+      return function(ev) { return Promise.resolve(fn.apply(target, args.concat([ev]))) }
     },
     addNotification() {}, showModal() {}, hideModal() {}
   }
   const poll = { add() {} }
   const code = await fs.readFile(new URL('files/www/luci-static/resources/view/ourfreemodel.js', root), 'utf8')
-  assert.match(code, /serviceAction: function\(ev, action\)/, '按钮处理函数必须先接收事件对象')
+  assert.match(code, /serviceAction: function\(action, ev\)/, '按钮处理函数必须先接收 action，事件对象在最后')
   const view = new Function('view', 'form', 'uci', 'rpc', 'network', 'ui', 'poll', 'L', 'E', '_', code)(
     { extend: object => object }, { Map, NamedSection: 'section', Value: 'input', Flag: 'flag', ListValue: 'list' }, {}, rpc, {}, ui, poll, L, E, value => value)
   const networks = [{ getName: () => 'lan', getIPAddrs: () => ['192.168.8.1/24'], getIP6Addrs: () => [] }]
   const container = await view.render([null, networks, { running: true, api: {}, web: {} }])
+  assert.equal(container.children[1].children, '操作', '操作栏标题应为“操作”')
   const actions = container.children[2].children
+  const texts = actions.map(button => button.children)
+  // 运行中只显示“停止”，不显示“启动”，两者互斥。
+  assert.ok(texts.includes('停止') && !texts.includes('启动'))
+  assert.ok(texts.includes('开机自启') && !texts.includes('取消开机自启'))
   const stop = actions.find(button => button.children === '停止')
   assert.equal(stop.attributes.disabled, undefined, '操作按钮不应预先禁用，权限交由 rpcd ACL 校验')
   await stop.attributes.click({ currentTarget: { disabled: false } })
