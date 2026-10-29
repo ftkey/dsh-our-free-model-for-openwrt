@@ -240,8 +240,8 @@ return view.extend({
 		poll.add(function() { return self.refreshStatus(); }, 5);
 		return m.render().then(function(map) {
 			return E('div', {}, [
-				E('div', { 'class': 'cbi-section' }, [E('h2', {}, _('操作')), actionsNode]),
 				statusNode,
+				E('div', { 'class': 'cbi-section' }, [E('h2', {}, _('操作')), actionsNode]),
 				map
 			]);
 		});
