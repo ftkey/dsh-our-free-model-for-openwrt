@@ -160,13 +160,27 @@ test('LuCI 视图呈现两个端口、接口选择和密码重置，校验端口
   }
   const E = (tag, attributes, children) => ({ tag, attributes, children })
   const L = { hasViewPermission: () => true, dom: { content: (node, child) => { node.children = child } } }
-  const rpc = { declare: () => async () => ({}) }
-  const ui = { createHandlerFn: () => () => {} }, poll = { add() {} }
+  const rpcCalls = []
+  const rpc = { declare: () => async (...args) => { rpcCalls.push(args); return {} } }
+  // 与 LuCI 一致：createHandlerFn 先传事件对象，再追加绑定参数。
+  const ui = {
+    createHandlerFn(target, method, ...args) {
+      return function(ev) { return Promise.resolve(target[method](ev, ...args)) }
+    },
+    addNotification() {}, showModal() {}, hideModal() {}
+  }
+  const poll = { add() {} }
   const code = await fs.readFile(new URL('files/www/luci-static/resources/view/ourfreemodel.js', root), 'utf8')
+  assert.match(code, /serviceAction: function\(ev, action\)/, '按钮处理函数必须先接收事件对象')
   const view = new Function('view', 'form', 'uci', 'rpc', 'network', 'ui', 'poll', 'L', 'E', '_', code)(
     { extend: object => object }, { Map, NamedSection: 'section', Value: 'input', Flag: 'flag', ListValue: 'list' }, {}, rpc, {}, ui, poll, L, E, value => value)
   const networks = [{ getName: () => 'lan', getIPAddrs: () => ['192.168.8.1/24'], getIP6Addrs: () => [] }]
-  await view.render([null, networks, { running: true, api: {}, web: {} }])
+  const container = await view.render([null, networks, { running: true, api: {}, web: {} }])
+  const actions = container.children[2].children
+  const stop = actions.find(button => button.children === '停止')
+  assert.equal(stop.attributes.disabled, undefined, '操作按钮不应预先禁用，权限交由 rpcd ACL 校验')
+  await stop.attributes.click({ currentTarget: { disabled: false } })
+  assert.deepEqual(rpcCalls, [['stop']], '点击停止应把 action 字符串传给 RPC')
   const options = maps[0].options
   for (const name of ['api_port', 'web_port', 'api_interface', 'web_interface', 'api_address', 'web_address', 'data_dir']) assert.ok(options.some(option => option.option === name), name)
   assert.ok(!options.some(option => /password/.test(option.option)), '密码不得存入明文 UCI')

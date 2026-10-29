@@ -58,15 +58,16 @@ return view.extend({
 		});
 	},
 
-	serviceAction: function(action, ev) {
-		var button = ev.currentTarget;
-		button.disabled = true;
+	// ui.createHandlerFn 会先传事件对象，再追加绑定的参数，因此顺序必须是 (ev, action)。
+	serviceAction: function(ev, action) {
+		var button = ev && ev.currentTarget;
+		if (button) button.disabled = true;
 		return callService(action).then(function(result) {
 			if (!result.ok) throw new Error(result.error || _('操作失败'));
 			ui.addNotification(null, E('p', _('操作已提交，请等待服务状态更新。')), 'info');
 		}).catch(function(error) {
-			ui.addNotification(null, E('p', error.message), 'error');
-		}).finally(function() { button.disabled = false; });
+			ui.addNotification(null, E('p', {}, error.message), 'error');
+		}).finally(function() { if (button) button.disabled = false; });
 	},
 
 	resetPassword: function() {
@@ -163,7 +164,8 @@ return view.extend({
 	},
 
 	render: function(data) {
-		var self = this, networks = data[1], status = data[2], writable = L.hasViewPermission();
+		// 操作按钮交给 rpcd ACL 在调用时鉴权：只读账号会收到 ubus 权限错误提示，不在这里预先禁用。
+		var self = this, networks = data[1], status = data[2];
 		var m = new form.Map('ourfreemodel', 'OurFreeModel',
 			_('自带 WebUI 使用独立管理密码；模型 API 使用 API Key。两个端口和监听接口分别配置，修改后点击保存并应用。'));
 		var s = m.section(form.NamedSection, 'main', 'ourfreemodel', _('基本设置'));
@@ -216,10 +218,10 @@ return view.extend({
 		this.drawStatus(statusNode, status);
 		poll.add(function() { return callStatus().then(function(next) { self.drawStatus(statusNode, next); }); }, 5);
 		var buttons = [['start', _('启动')], ['stop', _('停止')], ['restart', _('重启')], ['enable', _('开机自启')], ['disable', _('取消自启')]].map(function(item) {
-			return E('button', { 'class': 'btn cbi-button', disabled: !writable, click: ui.createHandlerFn(self, 'serviceAction', item[0]) }, item[1]);
+			return E('button', { 'class': 'btn cbi-button', click: ui.createHandlerFn(self, 'serviceAction', item[0]) }, item[1]);
 		});
-		buttons.push(E('button', { 'class': 'btn cbi-button cbi-button-action', disabled: !writable, click: ui.createHandlerFn(this, 'resetRandomPassword') }, _('重置为随机密码')));
-		buttons.push(E('button', { 'class': 'btn cbi-button', disabled: !writable, click: ui.createHandlerFn(this, 'resetPassword') }, _('手动设置 WebUI 密码')));
+		buttons.push(E('button', { 'class': 'btn cbi-button cbi-button-action', click: ui.createHandlerFn(this, 'resetRandomPassword') }, _('重置为随机密码')));
+		buttons.push(E('button', { 'class': 'btn cbi-button', click: ui.createHandlerFn(this, 'resetPassword') }, _('手动设置 WebUI 密码')));
 		return m.render().then(function(map) {
 			return E('div', {}, [E('h2', {}, 'OurFreeModel'), statusNode, E('div', { 'class': 'cbi-page-actions' }, buttons), map]);
 		});
