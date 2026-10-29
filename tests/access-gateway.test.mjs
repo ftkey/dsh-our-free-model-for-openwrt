@@ -123,7 +123,13 @@ test('跨站请求、伪造代理来源、超大表单和连续猜测被拒绝',
   let at = Date.now()
   const { call, login } = await fixture(t, { now: () => at })
   assert.equal((await call('/ourfreemodel-access/login', { headers: { origin: 'http://evil.test', 'x-forwarded-host': 'evil.test' } })).status, 403)
-  assert.equal((await call('/ourfreemodel-access/login', { headers: { 'sec-fetch-site': 'cross-site' } })).status, 403)
+  // 只是打开登录页：即使被浏览器标为 cross-site 也允许，避免从 LuCI/内置浏览器跳转时看到 JSON 报错。
+  assert.equal((await call('/ourfreemodel-access/login', { headers: { 'sec-fetch-site': 'cross-site' } })).status, 200)
+  // 跨站提交密码表单仍然拒绝。
+  assert.equal((await call('/ourfreemodel-access/login', {
+    method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', 'sec-fetch-site': 'cross-site' },
+    body: new URLSearchParams({ password }),
+  })).status, 403)
   assert.equal((await call('/ourfreemodel-access/login', {
     method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'password=' + 'a'.repeat(4096),
   })).status, 413)

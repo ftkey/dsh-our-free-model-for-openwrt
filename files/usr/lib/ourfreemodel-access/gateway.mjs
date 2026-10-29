@@ -63,12 +63,14 @@ export async function startAccessGateway({ targetUrl, managementKey, credential,
     for (const [id, entry] of failures) if (entry.until <= now()) failures.delete(id)
   }
   const sameOrigin = req => {
-    if (req.headers['sec-fetch-site'] === 'cross-site') return false
+    // 顶层页面浏览（GET/HEAD 且无 Origin）只读取页面、不改变状态。从其他站点、LuCI 或 IDE 内置浏览器
+    // 点链接进入时 Referer 属于外部来源，Sec-Fetch-Site 也可能被标成 cross-site，仍应能打开登录页；
+    // 跨站写操作（登录表单、管理接口）继续校验 Origin、Referer 与 Sec-Fetch-Site。
+    const navigation = ['GET', 'HEAD'].includes(req.method) && req.headers.origin === undefined
+    if (!navigation && req.headers['sec-fetch-site'] === 'cross-site') return false
     try {
       const own = origin(req)
-      // 顶层页面浏览（GET/HEAD 且无 Origin）不改变状态。浏览器可能从其他站点或 LuCI 页面点链接进入，
-      // 此时 Referer 属于外部来源，不应把登录页本身拒绝掉；跨站写操作仍然校验 Origin 与 Referer。
-      const keys = ['GET', 'HEAD'].includes(req.method) && req.headers.origin === undefined ? [] : ['origin', 'referer']
+      const keys = navigation ? [] : ['origin', 'referer']
       return keys.every(key => req.headers[key] === undefined || new URL(req.headers[key]).origin === own)
     } catch { return false }
   }
