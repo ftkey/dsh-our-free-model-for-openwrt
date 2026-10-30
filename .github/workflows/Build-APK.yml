@@ -22,7 +22,7 @@ on:
       sync_upstream:
         description: 同步 Ebony-Vinyl/dsh-our-free-model 最新默认分支后编译（仅 main）
         type: boolean
-        default: false
+        default: true
       publish:
         description: 编译成功后发布到 GitHub Releases
         type: boolean
