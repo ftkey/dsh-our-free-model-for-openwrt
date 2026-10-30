@@ -21,7 +21,7 @@ ARM64 目标依据 [ER1-WRT-CI 的 ROM 配置](https://github.com/ftkey/ER1-WRT-
 2. 推送到 `main` **不会**自动触发编译；需要编译时在 **Actions → Build APK / IPK → Run workflow** 手动运行（默认勾选 `sync_upstream`，会先同步上游），或推送 `v*` 标签。PR 只构建对应提交。定时运行同样会同步上游。
 3. 手动运行时选择「打包格式」：`apk` 或 `ipk`，默认 `apk`。定时和标签构建默认使用 APK。
 4. 编译完成后下载 Artifacts 中对应格式、平台的 ZIP，如 `dsh-our-free-model-for-openwrt-ipk-arm64-ipq60xx`。每个平台包含所选格式的软件包、`SHA256SUMS`、对应的元数据文件、`PACKAGE-FORMAT`、`SDK.config`、SDK 下载校验列表、移植版本信息及源提交 SHA。
-5. 需要发布到 Releases 时，手动运行时勾选 `publish`，或推送 `v*` 标签。手动运行未勾选 `publish` 时只上传 Artifact。无需配置额外 Secret，发布使用仓库内置 `GITHUB_TOKEN`。
+5. 需要发布到 Releases 时，手动运行默认勾选 `publish`（发布后自动创建 `apk-<运行号>-<尝试号>` 标签，该标签不匹配 `v*`，不会再次触发构建），也可推送 `v*` 标签。取消勾选 `publish` 则只上传 Artifact。无需配置额外 Secret，发布使用仓库内置 `GITHUB_TOKEN`。
 
 软件包使用 SDK 命名规则，例如 `dsh-our-free-model-for-openwrt-2.7.2-r4.apk` 或 `dsh-our-free-model-for-openwrt_2.7.2-r4_all.ipk`，实际版本以 Artifact 为准。载荷是纯 JS，配方使用 `PKGARCH:=all`；仍分别使用两个平台 SDK 处理依赖和验证，产物按平台分开保存。不会打包 Node.js，需要从固件软件源安装。
 
@@ -34,7 +34,7 @@ ARM64 目标依据 [ER1-WRT-CI 的 ROM 配置](https://github.com/ftkey/ER1-WRT-
 - 上游版本不变时自动递增 `PKG_RELEASE`；版本升级时重置为 `1`。版本回退或必要文件缺失会报错停止。
 - 定时运行时，如果上游没变化且当前仓库提交已有成功运行记录，则跳过编译；没有成功记录时继续构建，因此首次失败后可在后续定时运行中重试。手动运行始终编译。
 - ARM64 和 AMD64 构建固定使用同步后确定的同一个仓库提交；`SOURCE-SHA`、`PORT-VERSION.json` 分别记录移植仓库与上游提交。
-- 手动运行默认同步上游（取消勾选 `sync_upstream` 则只编译当前快照）；勾选 `publish` 可同时发布 Releases。定时运行默认只上传 Artifact。
+- 手动运行默认同步上游（取消勾选 `sync_upstream` 则只编译当前快照）；并默认发布 Releases（取消勾选 `publish` 则只上传 Artifact）。定时运行和标签构建默认只上传 Artifact。
 - 已知上游同步可能被 GitHub 的 OAuth 凭据推送保护拦截。同步后会把 Gemini CLI 的公开凭据常量还原为拼接写法（`scripts/strip-gemini-secrets.mjs`）以避免拦截；仍有明文残留时报错停止，不推送被拒的提交。
 
 将新版工作流和 `scripts/sync-upstream.sh` 一起推送到 `main` 后生效，无需额外 PAT 或 Secret。工作流使用内置 `GITHUB_TOKEN` 写回同步结果；`main` 的分支规则需允许该机器人提交。

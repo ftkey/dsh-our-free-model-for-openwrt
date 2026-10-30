@@ -26,7 +26,7 @@ on:
       publish:
         description: 编译成功后发布到 GitHub Releases
         type: boolean
-        default: false
+        default: true
 
 permissions:
   contents: read
