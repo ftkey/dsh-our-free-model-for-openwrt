@@ -198,7 +198,7 @@ return view.extend({
 		var o = s.taboption('general', form.Flag, 'enabled', _('启用服务'));
 		o.default = '1'; o.rmempty = false;
 		o = s.taboption('general', form.Value, 'data_dir', _('数据目录'), _('建议使用持久挂载盘。更换目录不会自动迁移已有账号、密钥和用量记录。'));
-		o.default = '/usr/lib/ourfreemodel-data'; o.rmempty = false; o.datatype = 'directory';
+		o.default = '/etc/ourfreemodel'; o.rmempty = false; o.datatype = 'directory';
 
 		['api', 'web'].forEach(function(kind) {
 			var label = kind === 'api' ? 'API' : 'WebUI';

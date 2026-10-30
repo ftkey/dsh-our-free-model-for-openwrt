@@ -30,6 +30,14 @@ if ! uci -q get ourfreemodel.main.web_port >/dev/null; then
   uci set "ourfreemodel.main.web_port=$web_port"
 fi
 uci commit ourfreemodel
+# 默认数据目录在 /etc 下，并写入 sysupgrade 保留列表，保证升级时账号与用量不丢。
+data_dir=$(uci -q get ourfreemodel.main.data_dir)
+[ -n "$data_dir" ] || data_dir=/etc/ourfreemodel
+mkdir -p "$data_dir"
+case "$data_dir" in
+  /etc/*)
+    grep -qxF "$data_dir" /etc/sysupgrade.conf 2>/dev/null || echo "$data_dir" >> /etc/sysupgrade.conf ;;
+esac
 # 首次安装即生成随机 WebUI 密码，LuCI 可直接查看并复制。
 if [ -f /usr/lib/ourfreemodel-access/password.mjs ] && [ -x /usr/bin/node ]; then
   /usr/bin/node /usr/lib/ourfreemodel-access/password.mjs generate || exit 1

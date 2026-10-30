@@ -19,7 +19,7 @@ start_service() {
   config_get_bool enabled main enabled 1
   [ "$enabled" = 1 ] || return 0
   ensure_password
-  config_get data_dir main data_dir /usr/lib/ourfreemodel-data
+  config_get data_dir main data_dir /etc/ourfreemodel
   config_get api_port main api_port 18900
   config_get api_interface main api_interface lan
   config_get api_address main api_address ''

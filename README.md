@@ -86,7 +86,7 @@ opkg install ./dsh-our-free-model-for-openwrt_2.7.2-r4_all.ipk
 
 服务入口为 `/usr/lib/ourfreemodel-access/cli.mjs`。上游运行时只监听本机临时端口；面向用户提供两个独立入口。`/etc/config/ourfreemodel`、`/etc/ourfreemodel-access.json` 声明为升级保留配置，均不含明文密码。`/etc/ourfreemodel-access.json` 保存 WebUI 密码的 scrypt 随机盐和哈希；密码由随机生成时，另一份明文保存在 `/etc/ourfreemodel-webui-secret`（`0600`，仅 root 可读），供 LuCI 显示和复制，手动设置密码时会删除该文件。首次安装或密码文件缺失时自动生成 16 位随机密码，因此 WebUI 开箱即可登录；API 始终独立运行，不依赖 WebUI 密码。
 
-服务名称、UCI 配置和安装路径统一使用 `ourfreemodel`：`/etc/init.d/ourfreemodel`、`/etc/config/ourfreemodel`、`/usr/lib/ourfreemodel`。升级时自动迁移旧 `ofm` 服务的配置、WebUI 密码、默认数据目录及开机自启链接；自定义数据目录保持原路径。若新旧默认数据目录同时存在，保留原数据路径，避免覆盖。
+服务名称、UCI 配置和安装路径统一使用 `ourfreemodel`：`/etc/init.d/ourfreemodel`、`/etc/config/ourfreemodel`、`/usr/lib/ourfreemodel`。默认数据目录为 `/etc/ourfreemodel`，安装时会自动写入 `/etc/sysupgrade.conf`，因此保留配置升级（`sysupgrade -c`）不会丢失账号、密钥与用量记录；数据量较大时建议改到持久挂载盘。升级时自动迁移旧 `ofm` 服务的配置、WebUI 密码、默认数据目录及开机自启链接，并把早期默认目录 `/usr/lib/ourfreemodel-data` 搬到 `/etc/ourfreemodel`；自定义数据目录保持原路径。若新旧默认数据目录同时存在，保留原数据路径，避免覆盖。
 
 ## LuCI 菜单
 
