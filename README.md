@@ -27,7 +27,7 @@ ARM64 目标依据 [ER1-WRT-CI 的 ROM 配置](https://github.com/ftkey/ER1-WRT-
 2. 推送到 `main` **不会**自动触发编译；需要编译时在 **Actions → Build APK / IPK → Run workflow** 手动运行（默认勾选 `sync_upstream`，会先同步上游），或推送 `v*` 标签。PR 只构建对应提交。定时运行同样会同步上游。
 3. 手动运行时选择「打包格式」：`apk` 或 `ipk`，默认 `apk`。定时和标签构建默认使用 APK。
 4. 编译完成后下载 Artifacts 中对应格式、平台的 ZIP，如 `dsh-our-free-model-for-openwrt-ipk-arm64-ipq60xx`。每个平台包含所选格式的软件包、`SHA256SUMS`、对应的元数据文件、`PACKAGE-FORMAT`、`SDK.config`、SDK 下载校验列表、移植版本信息及源提交 SHA。
-5. 需要发布到 Releases 时，手动运行默认勾选 `publish`（发布后自动创建 `apk-<运行号>-<尝试号>` 标签，该标签不匹配 `v*`，不会再次触发构建），也可推送 `v*` 标签。取消勾选 `publish` 则只上传 Artifact。无需配置额外 Secret，发布使用仓库内置 `GITHUB_TOKEN`。
+5. 需要发布到 Releases 时，手动运行默认勾选 `publish`。发布标签按包版本命名，如 `apk-2.7.2-r5` 或 `ipk-2.7.2-r5`（`<格式>-<上游版本>-r<发布号>`，来自 `payload/PORT-VERSION.json` 与 `Makefile` 的 `PKG_RELEASE`）；同一版本重复编译会覆盖同一个 Release，不新增标签。该标签不匹配 `v*`，不会反过来触发构建。也可推送 `v*` 标签，此时直接使用该标签名。取消勾选 `publish` 则只上传 Artifact。无需配置额外 Secret，发布使用仓库内置 `GITHUB_TOKEN`。
 
 软件包使用 SDK 命名规则，例如 `dsh-our-free-model-for-openwrt-2.7.2-r4.apk` 或 `dsh-our-free-model-for-openwrt_2.7.2-r4_all.ipk`，实际版本以 Artifact 为准。载荷是纯 JS，配方使用 `PKGARCH:=all`；仍分别使用两个平台 SDK 处理依赖和验证，产物按平台分开保存。不会打包 Node.js，需要从固件软件源安装。
 
