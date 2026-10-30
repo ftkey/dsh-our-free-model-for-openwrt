@@ -99,8 +99,9 @@ export async function migrateLegacy({ root = '/', stopLegacy = async () => {
   }
   await fs.mkdir(file('etc'), { recursive: true })
   await fs.writeFile(marker, '1\n', { mode: 0o600 })
-  // 旧目录刚改名为中间名，再走一次新旧默认目录搬迁。
-  return { migrated: Boolean(legacy) || await relocateDefaultData(file) || relocated }
+  // 旧目录刚改名为中间名，再走一次新旧默认目录搬迁（必须无条件执行，不能用 || 短路）。
+  const finalRelocated = await relocateDefaultData(file)
+  return { migrated: Boolean(legacy) || finalRelocated || relocated }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
