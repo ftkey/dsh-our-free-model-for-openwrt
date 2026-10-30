@@ -6,7 +6,7 @@ on:
     # UTC 00:17：每 24 小时检查一次，北京时间约每天 08:17。
     - cron: '17 0 * * *'
   push:
-    branches: [main]
+    # 推送到 main 不再触发编译，避免每次提交都占用构建资源；只保留版本标签。
     tags: ['v*']
   pull_request:
     branches: [main]
