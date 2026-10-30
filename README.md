@@ -4,6 +4,12 @@
 
 仓库地址：[ftkey/dsh-our-free-model-for-openwrt](https://github.com/ftkey/dsh-our-free-model-for-openwrt)。软件包名和 APK 文件名前缀统一为 `dsh-our-free-model-for-openwrt`。这是安装到现有 ROM 的软件包，不会生成或重命名整个路由器固件镜像。
 
+## 界面预览
+
+LuCI → 服务 → OurFreeModel。页面从上到下依次是标题与说明、状态表、操作按钮和基本设置；WebUI 管理密码默认掩码显示，点「显示」可临时回显。
+
+![OurFreeModel LuCI 页面](docs/luci-ourfreemodel.png)
+
 ## GitHub Actions 编译 APK / IPK
 
 使用 ImmortalWrt snapshot SDK 的同一套 `BuildPackage` 配方生成 APK 或 IPK，通过 `CONFIG_USE_APK` 切换格式。APK 使用 SDK 的 `apk adbdump` 核对元数据；IPK 检查控制信息、运行时和 LuCI 安装内容。下载 SDK 时检查 SHA256，SDK 提供签名公钥时验证 APK 签名。
@@ -150,6 +156,7 @@ files/usr/share/luci/menu.d/    LuCI 菜单注册
 files/usr/share/rpcd/acl.d/     LuCI 读写权限
 files/usr/libexec/rpcd/         受 ACL 保护的服务控制与密码重置 RPC
 tests/                         WebUI、API、接口绑定及 LuCI 回归测试
+docs/luci-ourfreemodel.png     README 界面截图
 LICENSE                        上游 MIT 许可
 ```
 
