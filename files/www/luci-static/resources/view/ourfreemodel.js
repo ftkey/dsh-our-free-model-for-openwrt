@@ -158,9 +158,14 @@ return view.extend({
 	drawStatus: function(node, status) {
 		var api = endpointUrl(status.api), web = endpointUrl(status.web), self = this;
 		var passwordCell;
+		self.lastStatus = status;
 		if (!status.passwordSet) passwordCell = _('尚未设置，首次启动会自动生成随机密码');
 		else if (this.secret) passwordCell = E('span', {}, [
-			E('code', {}, this.secret), ' ',
+			E('code', {}, self.showSecret ? self.secret : self.secret.replace(/./g, '•')), ' ',
+			E('button', { 'class': 'btn cbi-button cbi-button-small', click: function() {
+				self.showSecret = !self.showSecret;
+				self.drawStatus(node, self.lastStatus);
+			} }, self.showSecret ? _('隐藏') : _('显示')), ' ',
 			E('button', { 'class': 'btn cbi-button cbi-button-small', click: function() { self.copyPassword(); } }, _('复制'))
 		]);
 		else passwordCell = _('已设置（未保存明文；点下方“重置为随机密码”可生成可复制的密码）');
@@ -183,8 +188,8 @@ return view.extend({
 	render: function(data) {
 		// 操作按钮交给 rpcd ACL 在调用时鉴权：只读账号会收到 ubus 权限错误提示，不在这里预先禁用。
 		var self = this, networks = data[1], status = data[2];
-		var m = new form.Map('ourfreemodel', 'OurFreeModel',
-			_('自带 WebUI 使用独立管理密码；模型 API 使用 API Key。两个端口和监听接口分别配置，修改后点击保存并应用。'));
+		// 页面标题与说明放在页面顶部，表单本身不再渲染标题，避免标题与说明分离。
+		var m = new form.Map('ourfreemodel');
 		var s = m.section(form.NamedSection, 'main', 'ourfreemodel', _('基本设置'));
 		s.addremove = false;
 		s.tab('general', _('服务'));
@@ -240,7 +245,12 @@ return view.extend({
 		poll.add(function() { return self.refreshStatus(); }, 5);
 		return m.render().then(function(map) {
 			return E('div', {}, [
-				statusNode,
+				E('div', { 'class': 'cbi-map' }, [
+					E('h2', { 'name': 'content' }, 'OurFreeModel'),
+					E('div', { 'class': 'cbi-map-descr' },
+						_('自带 WebUI 使用独立管理密码；模型 API 使用 API Key。两个端口和监听接口分别配置，修改后点击保存并应用。'))
+				]),
+				E('div', { 'class': 'cbi-section' }, [statusNode]),
 				E('div', { 'class': 'cbi-section' }, [E('h2', {}, _('操作')), actionsNode]),
 				map
 			]);

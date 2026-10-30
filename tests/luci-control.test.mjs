@@ -148,7 +148,7 @@ test('RPC 读取完整 JSON 后即处理，不等待 rpcd 关闭 stdin，并拒�
 test('LuCI 视图呈现两个端口、接口选择和密码重置，校验端口冲突及 IP 归属', async () => {
   const maps = []
   class Map {
-    constructor() { this.options = []; maps.push(this) }
+    constructor(config, title) { this.config = config; this.title = title; this.options = []; maps.push(this) }
     section() {
       return { tab() {}, taboption: (tab, type, name) => {
         const option = { option: name, choices: [], value(value, label) { this.choices.push([value, label]) }, formvalue() { return this.current }, cfgvalue() { return undefined } }
@@ -177,7 +177,15 @@ test('LuCI 视图呈现两个端口、接口选择和密码重置，校验端口
     { extend: object => object }, { Map, NamedSection: 'section', Value: 'input', Flag: 'flag', ListValue: 'list' }, {}, rpc, {}, ui, poll, L, E, value => value)
   const networks = [{ getName: () => 'lan', getIPAddrs: () => ['192.168.8.1/24'], getIP6Addrs: () => [] }]
   const container = await view.render([null, networks, { running: true, api: {}, web: {} }])
-  const actionsSection = container.children[0]
+  // 页面标题与说明位于顶部同一块，且表单不再重复渲染标题。
+  const header = container.children[0]
+  assert.equal(header.tag, 'div')
+  assert.equal(header.attributes['class'], 'cbi-map')
+  assert.equal(header.children[0].tag, 'h2', '标题应为 h2')
+  assert.equal(header.children[0].children, 'OurFreeModel', '页面标题应在顶部')
+  assert.equal(header.children[1].attributes['class'], 'cbi-map-descr', '说明文字应紧跟标题')
+  assert.equal(maps[0].title, undefined, '表单不应重复渲染标题')
+  const actionsSection = container.children[2]
   assert.equal(actionsSection.children[0].children, '操作', '操作栏标题应为“操作”')
   const actions = actionsSection.children[1].children
   assert.match(actionsSection.children[1].attributes.style, /flex-wrap:wrap/, '操作按钮必须换行排列，避免窄屏溢出')
@@ -200,4 +208,15 @@ test('LuCI 视图呈现两个端口、接口选择和密码重置，校验端口
   const address = options.find(option => option.option === 'web_address')
   assert.equal(address.validate('main', '192.168.8.1'), true)
   assert.notEqual(address.validate('main', '192.168.9.1'), true)
+
+  // 状态表里的 WebUI 密码默认掩码显示，点“显示”才回显明文。
+  view.secret = 'abcdefghijklmnop'
+  const statusNode = E('div')
+  view.drawStatus(statusNode, { passwordSet: true, running: true, api: {}, web: {} })
+  const passwordRow = () => statusNode.children.children.find(row => row.children[0].children === 'WebUI 管理密码')
+  const cell = passwordRow().children[1].children
+  assert.equal(cell.children[0].children, '•'.repeat(16), '密码应默认掩码显示')
+  assert.equal(cell.children[2].children, '显示', '应提供显示按钮')
+  cell.children[2].attributes.click()
+  assert.equal(passwordRow().children[1].children.children[0].children, 'abcdefghijklmnop', '点击显示后应回显明文')
 })
