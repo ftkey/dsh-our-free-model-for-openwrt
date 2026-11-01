@@ -1,7 +1,7 @@
 {
-  "version": "2.7.4",
+  "version": "2.8.0",
   "channel": "openwrt",
   "source": "https://github.com/Ebony-Vinyl/dsh-our-free-model",
-  "sourceSha": "53f9b0cc25a2dc3f35cb2d4fc2ea0f7debebba65",
-  "builtAt": "2026-10-31T05:54:46.923Z"
+  "sourceSha": "999e9f784ea3ea7a11cae383b142697b1ff2c42f",
+  "builtAt": "2026-11-01T06:21:30.867Z"
 }

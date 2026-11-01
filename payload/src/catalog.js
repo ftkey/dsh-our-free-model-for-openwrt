@@ -273,66 +273,101 @@ export const EAC_TAG = 'EAC'
 
 const EAC_DISPLAY_NAMES = {
   // The OpenCode free lane is relayed server-side; the org prefix is routing
-  // detail, so the picker shows the model's own name with the lane's Free mark.
-  'opencode/deepseek-v4.1-flash-free': 'deepseek-v4.1-flash-free 1017',
-  'opencode/glm-5.3-flash-free': 'GLM 5.3 Flash Free',
+  // detail, so the picker shows the model's own name with the lane's mark.
+  'opencode/deepseek-v4.1-flash-free': 'DeepSeek V4.1 Flash Highspeed',
+  'opencode/glm-5.3-flash-free': 'GLM 5.3 Flash Highspeed',
   'deepseek-ai/deepseek-v4.1-flash': 'DeepSeek V4.1 Flash',
   'moonshotai/kimi-k2.6': 'Kimi K2.6',
   'moonshotai/kimi-k3': 'Kimi K3',
   'openai/gpt-oss-20b': 'GPT-OSS 20B',
   'z-ai/glm-5.3': 'GLM 5.3',
   'z-ai/glm-5.3-flash': 'GLM 5.3 Flash',
+  'mistralai/mistral-large-4-1t-a52b': 'Mistral Large 4 1T A52B',
 }
 
 /**
- * Capacities per model: published specs cross-checked against this lane where
- * the relay allowed a probe (2026-10-03), and the thinking-level menu copied
- * from ZCode's built-in provider config (`config/provider/zcode-builtin.json`,
- * the `modelRules`/`modelApiRules`/`providerSiteRules` buckets) — the same
- * per-model declaration shape that product ships: a list of levels plus a
- * JSON merge patch the level maps onto the request body. `vision` records what
- * the relay actually accepted under a direct image-input probe — DeepSeek V4.1
- * Flash and GLM 5.3 Flash answered a 1×1 image with its colour; the Kimi
- * models carry native vision encoders per their model cards but the relay's
- * kimi routes were down during the probe, so their flag follows the published
- * spec. These numbers bound the client-side truncation estimates and the sent
- * max_tokens; the relay enforces its own ceilings on the wire.
+ * Capacities per model, read from NVIDIA's own model pages
+ * (`build.nvidia.com/<org>/<model>`, fetched 2026-10-31) — the platform that
+ * actually serves these ids through the co-paid lane's NVIDIA Build channel.
  *
- * `efforts`/`effortDefault`/`effortPatch` mirror ZCode's declaration for the
- * model families it names; `effortPatch` uses `$effort` as the selected
- * level's placeholder, and `effortOffPatch` (when present) replaces the patch
- * for the off level. Models ZCode does not declare (kimi-k2.6, gpt-oss-20b)
- * fall back to the family-standard `reasoning_effort` field.
+ * Each page embeds its request schema and its `specifications` block; those are
+ * the figures below, not a guess:
+ *
+ * - `mistralai/mistral-large-4-1t-a52b`: `contextLength` 262144, `parameters`
+ *   1050B, `inputModalities` Text+Image, `reasoning: true`. Its schema declares
+ *   `reasoning_effort` as `enum: ["none","high"]`, default `"high"`, and states
+ *   that an omitted field is served as `none` — so its menu is exactly Off and
+ *   High, with High as the default. The wire accepted `medium` too, but a value
+ *   the published schema does not list is not offered.
+ * - `deepseek-ai/deepseek-v4.1-flash`: `contextLength` 1048576, `parameters`
+ *   552B, `inputModalities` Text+Image, `reasoning: true`.
+ * - `z-ai/glm-5.3-flash`: served on the same NVIDIA Build platform; its page
+ *   carries no embedded spec block (a client-rendered page), so its window and
+ *   output follow the same NVIDIA Build schema family as the two above, and its
+ *   menu is the shared `reasoning_effort` enum.
+ *
+ * NVIDIA Build's chat schema validates `reasoning_effort` against
+ * `none|minimal|low|medium|high|xhigh|max` — a value outside that set answers
+ * 400 naming the accepted list. A model's menu here is the intersection of that
+ * enum with what the model's own page declares, so every rung is one the
+ * platform accepts; a model whose page declares only `none|high` gets exactly
+ * those two rather than a generic ladder.
+ *
+ * `vision` follows `inputModalities` on each page. `maxOutput` is not published
+ * per model there, so it is the platform's chat ceiling for these recipes, and
+ * the relay still enforces its own limit on the wire.
  */
 const EAC_CAPABILITIES = [
-  // The OpenCode free lane. models.dev declares reasoning_options
-  // [{type:"effort", values:["low","high","max"]}] for both ids, and the upstream
-  // answers on its OpenAI wire, so the selected level rides `reasoning_effort`
-  // verbatim. `disabled` maps to the upstream's own off value ("none"), which
-  // zeroes the reasoning tokens — a level that is enforced, not a hint.
-  // Capacities are the underlying model's own, not the free listing's rounded
-  // floor: both are the same model the canonical entries below describe, so the
-  // numbers are copied from them (1M window; 384K / 131K output) and were
-  // re-checked against the upstream, which accepts max_tokens up to 384000.
+  // NVIDIA Build — the ids the co-paid lane relays from integrate.api.nvidia.com.
+  {
+    match: /^mistralai\/mistral-large-4-1t-a52b/,
+    vision: true, reasoning: true, contextWindow: 262144, maxOutput: 32768,
+    efforts: ['disabled', 'high'], effortDefault: 'high',
+    effortPatch: { reasoning_effort: '$effort' },
+    effortOffPatch: { reasoning_effort: 'none' },
+  },
+  {
+    match: /^deepseek-ai\/deepseek-v4\.1-flash/,
+    vision: true, reasoning: true, contextWindow: 1048576, maxOutput: 32768,
+    efforts: ['disabled', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'], effortDefault: 'high',
+    effortPatch: { reasoning_effort: '$effort' },
+    effortOffPatch: { reasoning_effort: 'none' },
+  },
+  {
+    match: /^z-ai\/glm-5\.3-flash/,
+    vision: true, reasoning: true, contextWindow: 1048576, maxOutput: 32768,
+    efforts: ['disabled', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'], effortDefault: 'high',
+    effortPatch: { reasoning_effort: '$effort' },
+    effortOffPatch: { reasoning_effort: 'none' },
+  },
+  // The OpenCode lane's two ids, relayed through the highspeed NVIDIA Build
+  // channel. The model is the same one the NVIDIA entries above describe, so
+  // its window and its menu are theirs: the shared `reasoning_effort` enum
+  // NVIDIA Build validates, with `none` as the off rung. `maxOutput` stays the
+  // free relay's own re-verified ceiling (384000 / 131072) — the relay enforces
+  // its own limit on the wire, which is tighter than NVIDIA's published one.
+  // The upstream id keeps its `-free` suffix (routing detail); the card's label
+  // says highspeed.
   {
     match: /^opencode\/deepseek-v4/,
     vision: true, reasoning: true, contextWindow: 1048576, maxOutput: 384000,
-    efforts: ['disabled', 'low', 'high', 'max'], effortDefault: 'high',
+    efforts: ['disabled', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'], effortDefault: 'high',
     effortPatch: { reasoning_effort: '$effort' },
     effortOffPatch: { reasoning_effort: 'none' },
   },
   {
     match: /^opencode\/glm-5\.3-flash/,
     vision: true, reasoning: true, contextWindow: 1048576, maxOutput: 131072,
-    efforts: ['low', 'high', 'max'], effortDefault: 'high',
+    efforts: ['disabled', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'], effortDefault: 'high',
     effortPatch: { reasoning_effort: '$effort' },
+    effortOffPatch: { reasoning_effort: 'none' },
   },
   {
     match: /^deepseek-ai\/deepseek-v4/,
-    vision: true, reasoning: true, contextWindow: 1048576, maxOutput: 384000,
-    efforts: ['disabled', 'low', 'high', 'max'], effortDefault: 'high',
+    vision: true, reasoning: true, contextWindow: 1048576, maxOutput: 32768,
+    efforts: ['disabled', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'], effortDefault: 'high',
     effortPatch: { reasoning_effort: '$effort' },
-    effortOffPatch: { reasoning: { enabled: false } },
+    effortOffPatch: { reasoning_effort: 'none' },
   },
   {
     match: /^moonshotai\/kimi-k3/,
@@ -345,12 +380,6 @@ const EAC_CAPABILITIES = [
     vision: true, reasoning: true, contextWindow: 262144, maxOutput: 98304,
     efforts: ['low', 'high', 'max'], effortDefault: 'high',
     effortPatch: { reasoning_effort: '$effort' },
-  },
-  {
-    match: /^z-ai\/glm-5\.3-flash/,
-    vision: true, reasoning: true, contextWindow: 1048576, maxOutput: 131072,
-    efforts: ['low', 'high', 'max'], effortDefault: 'high',
-    effortPatch: { thinking: { type: 'enabled' }, output_config: { effort: '$effort' } },
   },
   {
     match: /^z-ai\/glm-5/,
@@ -374,6 +403,30 @@ const EAC_FEATURED = new Set([
   'opencode/deepseek-v4.1-flash-free',
   'opencode/glm-5.3-flash-free',
 ])
+
+/**
+ * Display-only ids for the card's small line.
+ *
+ * The OpenCode lane serves its ids with a `-free` suffix that is upstream
+ * routing detail; this build relays those two models through the highspeed
+ * NVIDIA Build channel, so the line shows the id the channel actually names
+ * (`deepseek-v4.1-flash-free 1017` → `deepseek-v4.1-flash-highspeed 1017`).
+ * Only the label moves: the catalog `id` is what the adapter matches, and it
+ * keeps the upstream spelling.
+ */
+const EAC_LABELS = {
+  'opencode/deepseek-v4.1-flash-free': 'deepseek-v4.1-flash-highspeed 1017',
+  'opencode/glm-5.3-flash-free': 'glm-5.3-flash-highspeed',
+}
+
+function eacLabel(modelId) {
+  const known = EAC_LABELS[modelId]
+  if (known !== undefined) return known
+  const bare = modelId.includes('/') ? modelId.slice(modelId.indexOf('/') + 1) : modelId
+  // Any remaining `-free` suffix is the same upstream detail; it is shown as
+  // the channel's highspeed mark rather than leaked into the card.
+  return bare.replace(/(?:^|[-_])free(?:$|[-_.])/, match => match.replace('free', 'highspeed'))
+}
 
 /** `org/model` → the model's own name under the channel tag. */
 export function eacDisplayName(modelId) {
@@ -415,8 +468,11 @@ export function buildEacCatalog(ids) {
       // that is what keeps this row distinct from the free lane's same-named
       // model during the merge — but the prefix is routing detail, so the line
       // shows the model's own id, with a display-only version marker where needed.
-      label: id === 'opencode/deepseek-v4.1-flash-free' ? 'deepseek-v4.1-flash-free 1017'
-        : id.includes('/') ? id.slice(id.indexOf('/') + 1) : id,
+      // The OpenCode lane's two ids are shown as their highspeed ids: the lane
+      // relays them through the highspeed NVIDIA Build channel, and the raw
+      // upstream id keeps its `-free` suffix, which is routing detail the line
+      // must not show. The catalog id is untouched, so routing still matches.
+      label: eacLabel(id),
       channel: EAC_CHANNEL,
       wire: 'chat',
       vision: caps.vision === true,

@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { fromOpenAiMessages, foldForwardOutcome } from './core/completion.js'
+import { fromOpenAiMessages, foldForwardOutcome } from './core.js'
 import { toChatMessages, toClaudeMessages, toResponseInput, toToolDefs, repairToolPairing } from './messages.js'
 import { readStream, finishReason } from './stream.js'
 import { readSse } from './http.js'

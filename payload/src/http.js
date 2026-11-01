@@ -419,7 +419,9 @@ function emptyBodyFailure(status, retryAfterMs, imageContent) {
 }
 
 export async function postStreamed({ path, body, session, attributionUserAgent, signal, onData, timeoutMs = 300000 }) {
-  const headers = gatewayHeaders({ session: truncateSession(session), stream: true })
+  // The Messages wire carries the 2.x client's beta header (o2a/headers.js);
+  // the path is the only wire signal this layer sees.
+  const headers = gatewayHeaders({ session: truncateSession(session), stream: true, anthropic: path.includes('/messages') })
   headers['user-agent'] = userAgentWith(attributionUserAgent)
   let response
   try {

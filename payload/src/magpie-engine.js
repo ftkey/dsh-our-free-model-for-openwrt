@@ -400,6 +400,11 @@ const engineAppearanceCSS = `
 :root[data-ofm-engine] #addSheet > .row-head { height:auto; min-height:32px; gap:8px; }
 :root[data-ofm-engine] #addSheet .find { height:32px; }
 :root[data-ofm-engine] #addSheet .kind { padding-top:16px; }
+/* Upstream's "Compact at" row (#876) shrinks and wraps inside the agent prefs,
+   but the settings lists kept it flex:none: at a narrow panel width the fixed
+   76px number input sticks past the clipped list and loses half its width.
+   The same shrink-and-wrap answer, for the rows upstream missed. */
+:root[data-ofm-engine] .row.pref .compact-at { flex:0 1 auto; min-width:0; flex-wrap:wrap; row-gap:6px; }
 :root[data-ofm-engine-theme] {
   --ofm-bg:#f4f4f6; --ofm-card:#fff; --ofm-fg:#1c1c21; --ofm-quiet:#63636b;
   --ofm-muted:#85858d; --ofm-line:#e3e3e8; --ofm-accent:#4f46e5;
