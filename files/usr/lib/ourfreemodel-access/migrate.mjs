@@ -8,7 +8,9 @@ import { loadCredential } from './password.mjs'
 const run = promisify(execFile)
 const exists = file => fs.access(file).then(() => true, () => false)
 
-const OLD_DEFAULT_DATA = '/usr/lib/ourfreemodel-data'
+const LEGACY_DEFAULT_DATA = '/usr/lib/ofm-data'
+const PREVIOUS_DEFAULT_DATA = '/usr/lib/ourfreemodel-data'
+const DEFAULT_DATA = '/etc/ourfreemodel'
 
 async function waitUnlocked(file, directory) {
   const lockFile = file(path.join(directory.replace(/^\//, ''), 'service.lock'))
@@ -34,18 +36,24 @@ export async function migrateLegacy({ root = '/', stopLegacy = async () => {
   }
   const legacyConfig = await first('etc/config/openwrt-ofm')
   const legacyCredential = await first('etc/ofm-access.json')
-  const legacyData = file('usr/lib/ofm-data')
-  const newData = file(OLD_DEFAULT_DATA.replace(/^\//, ''))
+  const legacyData = file(LEGACY_DEFAULT_DATA.replace(/^\//, ''))
+  const previousData = file(PREVIOUS_DEFAULT_DATA.replace(/^\//, ''))
+  const newData = file(DEFAULT_DATA.replace(/^\//, ''))
   const legacy = legacyConfig || legacyCredential || await exists(legacyData)
   if (legacy) {
     await stopLegacy()
     let config = await fs.readFile(legacyConfig || file('etc/config/ourfreemodel'), 'utf8')
     const match = /^\s*option\s+data_dir\s+(?:'([^']*)'|"([^"]*)"|(\S+))/m.exec(config)
-    const dataDir = match ? match[1] ?? match[2] ?? match[3] : '/usr/lib/ofm-data'
-    for (const directory of new Set([dataDir, '/usr/lib/ofm-data'])) await waitUnlocked(file, directory)
-    // Move only our old default directory. User-chosen mount paths stay intact.
-    if (await exists(legacyData) && !await exists(newData)) await fs.rename(legacyData, newData)
-    if (!await exists(legacyData) && await exists(newData)) config = config.split('/usr/lib/ofm-data').join(OLD_DEFAULT_DATA)
+    const dataDir = match ? match[1] ?? match[2] ?? match[3] : LEGACY_DEFAULT_DATA
+    for (const directory of new Set([dataDir, LEGACY_DEFAULT_DATA, PREVIOUS_DEFAULT_DATA, DEFAULT_DATA])) await waitUnlocked(file, directory)
+    // Keep the user’s existing path if another default already exists, but migrate the old default
+    // into the current location only when no newer data dir has already been established.
+    if (dataDir === LEGACY_DEFAULT_DATA && await exists(legacyData) && !await exists(previousData) && !await exists(newData)) {
+      await fs.rename(legacyData, newData)
+      config = config.replace(new RegExp(String.raw`(?<=option\s+data_dir\s+['"]?)${LEGACY_DEFAULT_DATA.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=['"]?\s*(?:$|\n))`, 'g'), DEFAULT_DATA)
+    } else if (!await exists(legacyData) && await exists(newData)) {
+      config = config.split(LEGACY_DEFAULT_DATA).join(DEFAULT_DATA)
+    }
     config = config.replace(/(^\s*config\s+)ofm(?=\s)/gm, '$1ourfreemodel')
     await fs.mkdir(file('etc/config'), { recursive: true })
     await fs.writeFile(file('etc/config/ourfreemodel'), config, { mode: 0o600 })
