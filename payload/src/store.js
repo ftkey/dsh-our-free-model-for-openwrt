@@ -159,6 +159,15 @@ export const SETTINGS_INITIAL = {
   version: 1,
   /** Master switch: when off the routes stay registered but serve nothing. */
   enabled: true,
+  /** Allow installing unsigned local plugin packages from disk. Off by
+   *  default: the signed marketplace is the trust root, and a local package is
+   *  an explicit developer action with its own warning and badge. */
+  developerPlugins: false,
+  /** Install extension updates automatically once the registry tick runs and
+   *  the newer version has soaked past its supply-chain window (see
+   *  AUTO_UPDATE_SOAK_MS in src/extensions.js). Off by default: the update
+   *  badge is the prompt, the button is the decision. */
+  autoUpdateExtensions: false,
   /** Show region-limited models in the picker as soon as they answer. */
   exposeRegionModels: true,
   /** Advertisement only: retain catalog entries and historical model resolution. */
@@ -167,8 +176,15 @@ export const SETTINGS_INITIAL = {
   hideEacModels: false,
   /** Minutes between background catalog refreshes. Automatic availability
    *  probing is disabled by owner policy; only the manual reprobe button sends
-   *  probe requests. */
+   *  probe requests. Since 2.8.1 this cadence also cannot re-fetch the listing
+   *  more often than once a listing window (see src/core/runtime.js). */
   probeIntervalMinutes: 15,
+  /** The OpenCode lane's own proxy exit (issue #708's method): when set, this
+   *  lane's requests dial through it instead of the process's global egress,
+   *  which is how a burned per-IP quota window is left behind. Empty means the
+   *  global outlet when one runs, then the HTTP(S)_PROXY environment, then
+   *  direct. Never auto-rotated — the address is the user's own. */
+  freeLane: { proxyUrl: '' },
   /** Serve the OpenAI-compatible forward listener for other local harnesses. */
   forward: {
     enabled: false,

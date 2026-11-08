@@ -420,8 +420,11 @@ function emptyBodyFailure(status, retryAfterMs, imageContent) {
 
 export async function postStreamed({ path, body, session, attributionUserAgent, signal, onData, timeoutMs = 300000 }) {
   // The Messages wire carries the 2.x client's beta header (o2a/headers.js);
-  // the path is the only wire signal this layer sees.
-  const headers = gatewayHeaders({ session: truncateSession(session), stream: true, anthropic: path.includes('/messages') })
+  // the path is the only wire signal this layer sees. The project id derives
+  // from the same canonical session, so one conversation's retries,
+  // continuations and refreshes share one upstream quota bucket (PR #757).
+  const canonical = truncateSession(session)
+  const headers = gatewayHeaders({ session: canonical, project: canonical, stream: true, anthropic: path.includes('/messages') })
   headers['user-agent'] = userAgentWith(attributionUserAgent)
   let response
   try {
@@ -431,6 +434,13 @@ export async function postStreamed({ path, body, session, attributionUserAgent, 
     // `TimeoutError`/user Error rather than `AbortError` — testing the name alone
     // reported a cancelled turn as `TRANSPORT`, which is retryable.
     if (signal?.aborted === true || error?.name === 'AbortError') throw new UpstreamError('request aborted', CODE.aborted)
+    // A lane-configuration refusal (a missing Bun, an unusable proxy) is not an
+    // "upstream request failed": the sentence the lane wrote is already the
+    // actionable answer, so it ships unwrapped, with its flag intact for the
+    // surfaces that distinguish "fix your environment" from "upstream broke".
+    if (error?.laneConfig === true) {
+      throw new UpstreamError(String(error?.message ?? error), CODE.transport, { laneConfig: true })
+    }
     throw new UpstreamError(`our-free-model: upstream request failed: ${error?.message ?? error}${transportCause(error)}`, CODE.transport)
   }
 
@@ -625,7 +635,8 @@ export async function readSse(source, onData, signal, timeoutMs = 300000) {
 
 /** Fetch a small JSON document from the gateway with the fingerprint headers. */
 export async function getJson(path, { session, attributionUserAgent, signal, timeoutMs = 15000 } = {}) {
-  const headers = gatewayHeaders({ session: truncateSession(session ?? ''), stream: false, accept: 'application/json' })
+  const canonical = truncateSession(session ?? '')
+  const headers = gatewayHeaders({ session: canonical, project: canonical, stream: false, accept: 'application/json' })
   headers['user-agent'] = userAgentWith(attributionUserAgent)
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)

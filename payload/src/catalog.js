@@ -17,8 +17,11 @@ import { baseModelId, isResponsesModel } from './upstream.js'
 /** Free-tier ids the listing does not mark with a `-free` suffix. `big-pickle`
  *  is the lane's own long-standing free id (9router keeps the same id in its
  *  `KNOWN_FREE_OPENCODE_MODELS` for exactly this reason); models.dev prices it
- *  at 0/0. */
-const ALWAYS_FREE = new Set(['union-alpha', 'space-bunny-free', 'big-pickle'])
+ *  at 0/0. `union-alpha` (the lane's Messages-wire id) and `space-bunny-free`
+ *  retired from the live listing in the 2026-10-31 churn and are no longer
+ *  advertised — they stay classified here so a listing that revives them is
+ *  still served, and so the wire tests keep an honest Messages vehicle. */
+const ALWAYS_FREE = new Set(['big-pickle', 'union-alpha', 'space-bunny-free'])
 
 /**
  * Local capability baseline. `contextWindow`/`maxOutput` are the provider's
@@ -126,11 +129,35 @@ const FREE_ID_OVERRIDES = {
     effortPatch: { reasoning_effort: '$effort' },
     effortOffPatch: { reasoning_effort: 'none' },
   },
-  // models.dev: effort low|medium|high|xhigh|max; 1M window, 524288 output.
-  'space-bunny-free': {
-    vision: true, contextWindow: 1048576, maxOutput: 524288,
+  // models.dev (2026-11-06 roster): the live free set as the Oct-31 churn left
+  // it. Numbers are models.dev's published limits; region-gated ids (beam,
+  // crouton, pulse) are marked in REGION_SENSITIVE, not here.
+  'beam-free': {
+    vision: false, contextWindow: 1048576, maxOutput: 131072,
     efforts: ['low', 'medium', 'high', 'xhigh', 'max'], effortDefault: 'high',
     effortPatch: { reasoning_effort: '$effort' },
+  },
+  'flint-40b-free': {
+    vision: false, contextWindow: 262144, maxOutput: 65536,
+    efforts: ['low', 'medium', 'high', 'xhigh', 'max'], effortDefault: 'high',
+    effortPatch: { reasoning_effort: '$effort' },
+  },
+  'pulse-alpha-free': {
+    vision: true, contextWindow: 1048576, maxOutput: 131072,
+    efforts: ['low', 'high', 'max'], effortDefault: 'high',
+    effortPatch: { reasoning_effort: '$effort' },
+  },
+  // models.dev: 1M window, 270000 output, effort minimal..max (no `none` —
+  // thinking does not switch off in practice, so the menu starts at minimal).
+  'crouton-alpha-free': {
+    vision: true, contextWindow: 1048576, maxOutput: 262144,
+    efforts: ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'], effortDefault: 'high',
+    effortPatch: { reasoning_effort: '$effort' },
+  },
+  // models.dev: 262144/262144, reasoning_options empty → no level menu, so the
+  // free lane's token ladder applies.
+  'nemotron-3.5-lightning-free': {
+    vision: false, contextWindow: 262144, maxOutput: 262144,
   },
   // models.dev: 1M window, 131072 output, reasoning_options `toggle` only →
   // no level menu, so the free lane's token ladder applies.
@@ -145,22 +172,19 @@ const FREE_ID_OVERRIDES = {
 /** Human-facing display names, so a raw upstream id never reaches the picker. */
 const DISPLAY_NAMES = {
   'mimo-v2.6-flash-free': 'MiMo V2.6 Flash',
-  'mimo-v2.5-free': 'MiMo V2.5',
-  'muse-spark-1.3-contributor-free': 'Muse Spark 1.3',
-  'muse-spark-1.2-contributor-free': 'Muse Spark 1.2',
-  'nemotron-3-ultra-free': 'Nemotron 3 Ultra',
+  'beam-free': 'Beam Free',
+  'flint-40b-free': 'Flint 40B Free',
+  'pulse-alpha-free': 'Pulse Alpha Free',
+  'crouton-alpha-free': 'Crouton Alpha Free',
   'nemotron-3.5-lightning-free': 'Nemotron 3.5 Lightning',
-  'ling-3.0-flash-fin-free': 'Ling 3.0 Flash Fin',
-  'space-bunny-free': 'Space Bunny',
-  'union-alpha': 'Union Alpha',
-  'deepseek-v4-flash-free': 'DeepSeek V4 Flash',
   'deepseek-v4.1-flash-free': 'DeepSeek V4.1 Flash',
   'glm-5.3-flash-free': 'GLM 5.3 Flash',
-  'jev-1.13-free': 'Jev 1.13',
 }
 
-/** Ids whose regional availability is known to be egress-dependent. */
-const REGION_SENSITIVE = [/^muse.?spark/]
+/** Ids whose regional availability is known to be egress-dependent. The 2.2
+ * docs name Beam Free, Crouton Alpha Free and Pulse Alpha Free as region-gated;
+ * `muse-spark` kept its marker from the era it served. */
+const REGION_SENSITIVE = [/^muse.?spark/, /^beam/, /crouton/, /pulse-alpha/]
 
 /**
  * Is this id on the免密 lane? The gateway's listing mixes paid and free ids;
@@ -665,4 +689,104 @@ export function reviveKiloCatalog(stored) {
 /** Is this catalog row from the Kilo channel? */
 export function isKiloEntry(entry) {
   return entry?.channel === KILO_CHANNEL
+}
+
+// ── the extension lane ─────────────────────────────────────────────────────────
+
+/** Catalog tag for models an installed extension serves. */
+export const EXTENSION_CHANNEL = 'extension'
+
+/** The built-in lanes an extension may take over (`replaces`). Kept in step
+ *  with the marketplace's policy and with the runtime's takeover: only `kilo`
+ *  is actually stood down (`laneStandsDown` in src/core/runtime.js), and the
+ *  marketplace validator refuses any other claim — listing a lane here that
+ *  nothing implements would hand an extension the built-in ids and then lose
+ *  its rows to the built-in they collide with. */
+const REPLACEABLE_LANES = new Set(['kilo'])
+
+/** Wire spellings an extension channel may speak. */
+const EXTENSION_WIRES = new Set(['chat', 'responses', 'messages'])
+
+/**
+ * The catalog id one extension model answers to. Extension models are
+ * namespaced (`ext:<plugin>/<model>`) so a third-party roster can never shadow
+ * a built-in id by accident — unless the extension `replaces` that lane, in
+ * which case its models keep the lane's own ids and the built-in rows stand
+ * down (the kilo-free official extension demonstrates exactly this).
+ */
+export function extensionModelId(manifestId, modelId, replaces) {
+  const clean = String(modelId ?? '').trim()
+  if (replaces !== undefined && REPLACEABLE_LANES.has(replaces)) return clean
+  return `ext:${String(manifestId ?? '').trim()}/${clean}`
+}
+
+/** Is this catalog row served by an installed extension? */
+export function isExtensionEntry(entry) {
+  return entry?.channel === EXTENSION_CHANNEL
+}
+
+/** Normalize one `listModels`/manifest model row into a catalog entry, or null. */
+function extensionEntryOf(manifest, row) {
+  if (row === null || typeof row !== 'object' || Array.isArray(row)) return null
+  const modelId = typeof row.id === 'string' ? row.id.trim() : ''
+  if (modelId === '' || modelId.length > 128) return null
+  const wire = EXTENSION_WIRES.has(row.wire) ? row.wire : 'chat'
+  const contextWindow = number(row.contextWindow) ?? 131072
+  const entry = {
+    id: extensionModelId(manifest.id, modelId, manifest.replaces),
+    name: typeof row.name === 'string' && row.name.trim() !== '' ? row.name.trim() : displayModelName(modelId),
+    channel: EXTENSION_CHANNEL,
+    extensionId: manifest.id,
+    extensionName: typeof manifest.name === 'string' ? manifest.name : manifest.id,
+    modelId,
+    wire,
+    vision: row.vision === true,
+    reasoning: row.reasoning !== false,
+    contextWindow,
+    maxOutput: number(row.maxOutput) ?? Math.min(32768, contextWindow),
+    canDisableThinking: true,
+    regionSensitive: false,
+    source: 'manifest',
+  }
+  if (Array.isArray(row.efforts) && row.efforts.length > 0) {
+    const efforts = row.efforts.filter(level => typeof level === 'string' && level !== '').slice(0, 8)
+    if (efforts.length > 0) {
+      entry.efforts = efforts
+      entry.effortDefault = efforts.includes(row.effortDefault) ? row.effortDefault : efforts[efforts.length - 1]
+      // The declared level rides the wire as the model's own effort field — the
+      // extension names its own spelling via `effortKey` when it is not the
+      // common `reasoning_effort`/`reasoning.effort` shapes.
+      const key = typeof row.effortKey === 'string' && row.effortKey.trim() !== '' ? row.effortKey.trim() : null
+      entry.effortPatch = key !== null ? { [key]: '$effort' } : { reasoning_effort: '$effort' }
+      entry.canDisableThinking = efforts.includes('disabled') || efforts.includes('none')
+    }
+  }
+  return entry
+}
+
+/**
+ * Build the extension lane's catalog rows from one installed channel
+ * extension's model list. Rows that repeat an id are dropped.
+ */
+export function buildExtensionCatalog(manifest, rows) {
+  if (!manifest || typeof manifest !== 'object' || typeof manifest.id !== 'string') return []
+  const seen = new Set()
+  const entries = []
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const entry = extensionEntryOf(manifest, row)
+    if (entry === null || seen.has(entry.id)) continue
+    seen.add(entry.id)
+    entries.push(entry)
+  }
+  return entries
+}
+
+/**
+ * Which built-in lane an enabled extension takes over, or null. Only one
+ * extension may replace a lane; the first enabled claim wins and the rest are
+ * ignored until the conflict is resolved.
+ */
+export function extensionReplaces(manifest) {
+  const replaces = typeof manifest?.replaces === 'string' ? manifest.replaces : ''
+  return REPLACEABLE_LANES.has(replaces) ? replaces : null
 }
