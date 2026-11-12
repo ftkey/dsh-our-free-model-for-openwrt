@@ -26,9 +26,6 @@ test('Bun 资产清单覆盖两个构建架构且哈希完整', async () => {
     assert.match(asset.sha256, /^[0-9a-f]{64}$/)
     assert.equal(asset.binary, asset.file.replace(/\.zip$/, '/bun'))
   }
-  const makefile = await read('openwrt/dsh-our-free-model-bun/Makefile')
-  assert.match(makefile, /files\/bun-assets\.json/)
-  assert.match(makefile, /usr\/lib\/ourfreemodel\/bin/)
 })
 
 test('init 脚本向运行时传递免费通道与 Bun 路径', async () => {

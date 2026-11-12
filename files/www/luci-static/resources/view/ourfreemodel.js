@@ -158,7 +158,6 @@ return view.extend({
 		} }, _('移除'));
 		ui.showModal(_('移除 Bun 运行时'), [
 			E('p', {}, _('将删除 /usr/lib/ourfreemodel/bin/bun。其他模型通道不受影响，OpenCode 免费车道会提示缺少 Bun。')),
-			E('p', {}, _('如果 Bun 是通过软件包安装的，建议到「系统 → 软件包」卸载 dsh-our-free-model-bun，以同步包管理器元数据。')),
 			E('div', { 'class': 'right' }, [
 				E('button', { 'class': 'btn', click: function() { ui.hideModal(); } }, _('取消')),
 				' ', submit

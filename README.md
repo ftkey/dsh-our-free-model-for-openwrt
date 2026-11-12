@@ -2,7 +2,7 @@
 
 将 [dsh-our-free-model](https://github.com/Ebony-Vinyl/dsh-our-free-model) 的独立 Node.js 服务移植到 OpenWrt，提供独立的 OpenAI 兼容 API、带管理密码的自带 WebUI，以及 OurFreeModel LuCI 菜单。
 
-仓库地址：[ftkey/dsh-our-free-model-for-openwrt](https://github.com/ftkey/dsh-our-free-model-for-openwrt)。主程序包名和 APK 文件名前缀为 `dsh-our-free-model-for-openwrt`，另有可选的 `dsh-our-free-model-bun` 运行时包。这是安装到现有 ROM 的软件包，不会生成或重命名整个路由器固件镜像。
+仓库地址：[ftkey/dsh-our-free-model-for-openwrt](https://github.com/ftkey/dsh-our-free-model-for-openwrt)。主程序包名和 APK 文件名前缀为 `dsh-our-free-model-for-openwrt`。这是安装到现有 ROM 的软件包，不会生成或重命名整个路由器固件镜像。
 
 ## 界面预览
 
@@ -12,7 +12,7 @@ LuCI → 服务 → OurFreeModel。页面从上到下依次是标题与说明、
 
 ## GitHub Actions 编译 APK / IPK
 
-使用 ImmortalWrt snapshot SDK 的同一套 `BuildPackage` 配方生成 APK 或 IPK，通过 `CONFIG_USE_APK` 切换格式。APK 使用 SDK 的 `apk adbdump` 核对元数据；IPK 检查控制信息、运行时和 LuCI 安装内容。下载 SDK 时检查 SHA256，SDK 提供签名公钥时验证 APK 签名。
+使用 ImmortalWrt snapshot SDK 的同一套 `BuildPackage` 配方生成 APK 或 IPK，通过 `CONFIG_USE_APK` 切换格式。APK 使用 SDK 的 `apk adbdump` 核对元数据；IPK 检查控制信息、载荷和 LuCI 安装内容。下载 SDK 时检查 SHA256，SDK 提供签名公钥时验证 APK 签名。
 
 默认同时构建：
 
@@ -26,10 +26,10 @@ ARM64 目标依据 [ER1-WRT-CI 的 ROM 配置](https://github.com/ftkey/ER1-WRT-
 1. 将**本目录内容**放在新仓库根目录，确保包含隐藏的 `.github/`、根 `Makefile`、`files/` 和 `payload/`。不要将整个项目目录嵌套一层上传，也不要上传 `dist/`。
 2. 推送到 `main` **不会**自动触发编译；需要编译时在 **Actions → Build APK / IPK → Run workflow** 手动运行（默认勾选 `sync_upstream`，会先同步上游），或推送 `v*` 标签。PR 只构建对应提交。定时运行同样会同步上游。
 3. 手动运行时选择「打包格式」：`apk` 或 `ipk`，默认 `apk`。定时和标签构建默认使用 APK。
-4. 编译完成后下载 Artifacts 中对应格式、平台的 ZIP，如 `dsh-our-free-model-for-openwrt-ipk-arm64-ipq60xx`。每个平台包含主程序与 `dsh-our-free-model-bun` 两个软件包、`SHA256SUMS`、对应的元数据文件（`APK-METADATA.txt`/`IPK-METADATA.txt` 与 `BUN-METADATA.txt`）、`PACKAGE-FORMAT`、`SDK.config`、SDK 下载校验列表、移植版本信息及源提交 SHA。
+4. 编译完成后下载 Artifacts 中对应格式、平台的 ZIP，如 `dsh-our-free-model-for-openwrt-ipk-arm64-ipq60xx`。每个平台包含主程序软件包、`SHA256SUMS`、对应的元数据文件（`APK-METADATA.txt` 或 `IPK-METADATA.txt`）、`PACKAGE-FORMAT`、`SDK.config`、SDK 下载校验列表、移植版本信息及源提交 SHA。
 5. 需要发布到 Releases 时，手动运行默认勾选 `publish`。发布标签按包版本命名，如 `apk-2.7.2-r5` 或 `ipk-2.7.2-r5`（`<格式>-<上游版本>-r<发布号>`，来自 `payload/PORT-VERSION.json` 与 `Makefile` 的 `PKG_RELEASE`）；同一版本重复编译会覆盖同一个 Release，不新增标签。该标签不匹配 `v*`，不会反过来触发构建。也可推送 `v*` 标签，此时直接使用该标签名。取消勾选 `publish` 则只上传 Artifact。无需配置额外 Secret，发布使用仓库内置 `GITHUB_TOKEN`。
 
-软件包使用 SDK 命名规则，例如 `dsh-our-free-model-for-openwrt-<版本>-r<发布号>.apk` 或 `dsh-our-free-model-for-openwrt_<版本>-r<发布号>_all.ipk`，实际版本以 Artifact 为准。每次构建同时产出主程序与可选的 `dsh-our-free-model-bun`（Bun 运行时，按目标架构打包，解压后约 95 MiB）；Bun 包不随主程序强制安装。主程序载荷是纯 JS，配方使用 `PKGARCH:=all`；Bun 包使用目标架构。两个平台仍分别使用各自的 SDK 处理依赖和验证，产物按平台分开保存。不会打包 Node.js，需要从固件软件源安装。
+软件包使用 SDK 命名规则，例如 `dsh-our-free-model-for-openwrt-<版本>-r<发布号>.apk` 或 `dsh-our-free-model-for-openwrt_<版本>-r<发布号>_all.ipk`，实际版本以 Artifact 为准。主程序载荷是纯 JS，配方使用 `PKGARCH:=all`；Bun 运行时不再单独打包，需要时由 LuCI 按目标架构下载官方 musl 运行时。两个平台仍分别使用各自的 SDK 处理依赖和验证，产物按平台分开保存。不会打包 Node.js，需要从固件软件源安装。
 
 ## 自动同步上游
 
@@ -62,10 +62,8 @@ apk --print-arch
 将 ZIP 解压后的 APK 上传到路由器，再执行：
 
 ```sh
-# 文件名按实际下载结果替换；主程序可单独安装
+# 文件名按实际下载结果替换
 apk add --allow-untrusted ./dsh-our-free-model-for-openwrt-2.8.3-r5.apk
-# 仅使用 OpenCode 免费模型时再安装 Bun 运行时（独立可选包）
-apk add --allow-untrusted ./dsh-our-free-model-bun-1.4.4-r1.apk
 /etc/init.d/ourfreemodel enable
 /etc/init.d/ourfreemodel start
 # 首次安装会自动生成 16 位随机 WebUI 密码，在 LuCI → 服务 → OurFreeModel 中查看并复制。
@@ -80,11 +78,9 @@ APK 用于采用 `apk` 的固件；IPK 用于采用 `opkg` 的固件。IPK 安�
 ```sh
 opkg update
 opkg install ./dsh-our-free-model-for-openwrt_*.ipk
-# 可选：免费模型车道需要
-opkg install ./dsh-our-free-model-bun_*.ipk
 ```
 
-Bun 包是**可选独立包**：不安装时其他模型通道正常，只有 OpenCode 免费通道会提示缺少 Bun；安装后无需改配置（`free_transport` 默认 `auto` 会自动发现）。也可以在 LuCI 的「系统 → 软件包」页面上传本地 `.apk`/`.ipk` 安装两个包，或直接在 **服务 → OurFreeModel** 页面点击「下载并安装 Bun」按需下载官方 Bun 运行时；已安装后可点击「移除 Bun」，无需 SSH。
+Bun 运行时不再作为独立软件包发布：不安装时其他模型通道正常，只有 OpenCode 免费通道会提示缺少 Bun；在 **服务 → OurFreeModel** 页面点击「下载并安装 Bun」即可，安装后无需改配置（`free_transport` 默认 `auto` 会自动发现）。已安装后可点击「移除 Bun」，无需 SSH。不能直连 GitHub 时，可在电脑下载官方 Bun musl 归档，把其中的 `bun` 放到 `/usr/lib/ourfreemodel/bin/bun` 并执行 `chmod 755`。从旧版本升级且曾安装过 `dsh-our-free-model-bun` 的设备，请先执行一次 `apk del dsh-our-free-model-bun` 或 `opkg remove dsh-our-free-model-bun`，之后统一由 LuCI 管理运行时。
 
 选择 IPK 不会降低运行时要求，仍需要 Node.js 22.19+ 或 24+。部分旧版固件软件源只有 Node.js 20，必须先解决匹配的 Node 依赖；snapshot SDK 生成的 IPK 也需要与目标固件的依赖 ABI 匹配。
 
@@ -92,7 +88,7 @@ Bun 包是**可选独立包**：不安装时其他模型通道正常，只有 Op
 
 ### 免费模型车道与 Bun
 
-上游 2.8.x 的 OpenCode 免费推理通道要求本机 Bun；用 Node 通道请求会被上游按非 OpenCode 客户端限流（返回 “Free usage limit reached”）。本仓库单独构建 `dsh-our-free-model-bun`（不随主程序强制安装），把官方 Bun musl 运行时安装到 `/usr/lib/ourfreemodel/bin/bun`；主程序启动时按 `bun_path` 和 PATH 自动发现。相关 UCI 配置：
+上游 2.8.x 的 OpenCode 免费推理通道要求本机 Bun；用 Node 通道请求会被上游按非 OpenCode 客户端限流（返回 “Free usage limit reached”）。本仓库通过 LuCI 按需下载官方 Bun musl 运行时到 `/usr/lib/ourfreemodel/bin/bun`；主程序启动时按 `bun_path` 和 PATH 自动发现。相关 UCI 配置：
 
 ```sh
 # auto（默认）：找到 Bun 就用 Bun；bun：强制 Bun；node：强制旧 Node 通道（会触发上游限流）
@@ -102,12 +98,12 @@ uci commit ourfreemodel
 /etc/init.d/ourfreemodel restart
 ```
 
-除安装独立软件包外，LuCI 页面也提供运行时管理：
+LuCI 页面提供运行时管理：
 
 - 「下载并安装 Bun」读取主程序自带的 `/usr/lib/ourfreemodel/bun-assets.json`（与 Actions 构建共用 `scripts/bun-assets.json`），按路由器架构选择官方 `bun-linux-<arch>-musl.zip`，从 `github.com/oven-sh/bun/releases` 下载并校验清单中的 SHA256，解压出单个 `bun` 文件到 `/usr/lib/ourfreemodel/bin/bun`。
 - 下载在独立后台进程中完成，LuCI 轮询状态显示进度，避免大文件超出 rpcd 调用时长；安装和移除都不需要重启服务，下一请求会自动重新发现 Bun。
-- 「移除 Bun」只删除该运行时文件及其版本标记，不影响主程序、其他模型通道或已保存的配置。若 Bun 是通过 `apk`/`opkg` 安装的独立包，建议改用 `apk del dsh-our-free-model-bun` 或 `opkg remove dsh-our-free-model-bun`，让包管理器同步元数据。
-- 下载需要路由器能直连 GitHub，并预留约 150 MiB 的临时空间；官方归档解压后约 95 MiB。LuCI 使用 Node 内建 `fetch`，不会读取 `HTTP_PROXY`/`HTTPS_PROXY`；只能通过代理访问 GitHub 时，请改用上面的独立 Bun 软件包离线安装。
+- 「移除 Bun」只删除该运行时文件及其版本标记，不影响主程序、其他模型通道或已保存的配置。
+- 下载需要路由器能直连 GitHub，并预留约 150 MiB 的临时空间；官方归档解压后约 95 MiB。LuCI 使用 Node 内建 `fetch`，不会读取 `HTTP_PROXY`/`HTTPS_PROXY`；只能通过代理访问 GitHub 时，请在电脑下载官方归档后手动放入上述路径。
 
 服务入口为 `/usr/lib/ourfreemodel-access/cli.mjs`。上游运行时只监听本机临时端口；面向用户提供两个独立入口。`/etc/config/ourfreemodel`、`/etc/ourfreemodel-access.json` 声明为升级保留配置，均不含明文密码。`/etc/ourfreemodel-access.json` 保存 WebUI 密码的 scrypt 随机盐和哈希；密码由随机生成时，另一份明文保存在 `/etc/ourfreemodel-webui-secret`（`0600`，仅 root 可读），供 LuCI 显示和复制，手动设置密码时会删除该文件。首次安装或密码文件缺失时自动生成 16 位随机密码，因此 WebUI 开箱即可登录；API 始终独立运行，不依赖 WebUI 密码。
 
@@ -165,10 +161,9 @@ uci commit ourfreemodel
 
 ```text
 .github/workflows/Build-APK.yml  定时同步、编译与可选发布
-Makefile                       OpenWrt 主程序配方（Bun 为可选独立包）
+Makefile                       OpenWrt 主程序配方
 scripts/bun-assets.json        Bun 版本与两架构官方 musl 归档 SHA256（同时装入主程序供 LuCI 下载）
-openwrt/dsh-our-free-model-bun/  Bun 运行时软件包配方
-scripts/build-package.sh        APK/IPK SDK 编译、格式校验及产物收集（主程序 + Bun）
+scripts/build-package.sh        APK/IPK SDK 编译、格式校验及产物收集
 files/usr/lib/ourfreemodel-access/bun.mjs  LuCI 按需下载、校验、解压与移除 Bun 运行时
 scripts/build-apk.sh            保留原 APK 构建命令
 scripts/inspect-ipk.py          IPK 控制信息与安装内容校验
@@ -211,7 +206,7 @@ bash scripts/build-package.sh /path/to/sdk ./dist qualcommax ipq60xx apk
 bash scripts/build-package.sh /path/to/sdk ./dist qualcommax ipq60xx ipk
 ```
 
-也可把根 `Makefile`、`files/`、`payload/`、`scripts/bun-assets.json` 和 `openwrt/dsh-our-free-model-bun/` 复制到 ROM 源码的 `package/` 下（Bun 包需先把 `scripts/bun-assets.json` 对应架构的官方 musl 归档解压为 `files/bun`），并在 ROM 配置中启用 `CONFIG_PACKAGE_dsh-our-free-model-for-openwrt=y`；需要免费通道时再启用 `CONFIG_PACKAGE_dsh-our-free-model-bun=y`。`make-ipk.sh <SDK目录> <输出目录> <target> <subtarget>` 现在也转到同一 SDK 配方，不再手工拼装安装包。
+也可把根 `Makefile`、`files/`、`payload/` 和 `scripts/bun-assets.json` 复制到 ROM 源码的 `package/` 下，并在 ROM 配置中启用 `CONFIG_PACKAGE_dsh-our-free-model-for-openwrt=y`；需要免费通道时再通过 LuCI 下载 Bun。`make-ipk.sh <SDK目录> <输出目录> <target> <subtarget>` 现在也转到同一 SDK 配方，不再手工拼装安装包。
 
 自测命令：
 

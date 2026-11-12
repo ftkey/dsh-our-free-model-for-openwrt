@@ -17,8 +17,6 @@ REQUIRED = {
     'usr/share/rpcd/acl.d/luci-app-ourfreemodel.json',
     'www/luci-static/resources/view/ourfreemodel.js',
 }
-BUN_PACKAGE = 'dsh-our-free-model-bun'
-BUN_REQUIRED = {'usr/lib/ourfreemodel/bin/bun'}
 
 
 def inspect(file, expected):
@@ -51,12 +49,9 @@ def inspect(file, expected):
         raise ValueError('IPK 缺少版本或架构')
     with tarfile.open(fileobj=io.BytesIO(parts['data.tar.gz']), mode='r:gz') as archive:
         installed = {entry.name.removeprefix('./'): entry.size for entry in archive if entry.isfile()}
-    required = BUN_REQUIRED if expected == BUN_PACKAGE else REQUIRED
-    missing = required - installed.keys()
+    missing = REQUIRED - installed.keys()
     if missing:
         raise ValueError('IPK 缺少安装文件：' + ', '.join(sorted(missing)))
-    if expected == BUN_PACKAGE and not installed['usr/lib/ourfreemodel/bin/bun']:
-        raise ValueError('Bun 运行时文件为空')
     return control
 
 

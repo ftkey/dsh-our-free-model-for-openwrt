@@ -46,34 +46,6 @@ test:
   assert.deepEqual(await fs.readFile(path.join(dest, 'usr/lib/ourfreemodel/bun-assets.json')), await fs.readFile(path.join(repo, 'scripts', 'bun-assets.json')))
 })
 
-test('Bun 运行时包安装配方输出可执行文件并读取统一版本', async t => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ourfreemodel-bun-install-'))
-  t.after(() => fs.rm(dir, { recursive: true, force: true }))
-  await fs.mkdir(path.join(dir, 'include'))
-  await fs.mkdir(path.join(dir, 'files'))
-  await fs.writeFile(path.join(dir, 'rules.mk'), '')
-  await fs.writeFile(path.join(dir, 'include/package.mk'), `PKG_BUILD_DIR:=$(TOPDIR)/build/$(PKG_NAME)
-INSTALL_DIR:=mkdir -p
-INSTALL_BIN:=install -m0755
-`)
-  await fs.copyFile(path.join(repo, 'openwrt/dsh-our-free-model-bun/Makefile'), path.join(dir, 'Makefile'))
-  await fs.copyFile(path.join(repo, 'scripts/bun-assets.json'), path.join(dir, 'files/bun-assets.json'))
-  await fs.writeFile(path.join(dir, 'files/bun'), 'bun-fixture', { mode: 0o755 })
-  await fs.writeFile(path.join(dir, 'test.mk'), `stage=$(PKG_BUILD_DIR)/ipkg-bun/$(PKG_NAME)
-.PHONY: bun-test bun-version
-bun-test:
-	$(call Package/$(PKG_NAME)/install,$(stage))
-bun-version:
-	@echo $(PKG_VERSION)
-`)
-  const make = target => run('make', ['--no-print-directory', '-f', path.join(dir, 'Makefile'), '-f', path.join(dir, 'test.mk'), `TOPDIR=${dir}`, `INCLUDE_DIR=${dir}/include`, target], { cwd: dir, maxBuffer: 65536 })
-  assert.equal((await make('bun-version')).stdout.trim(), '1.4.4')
-  await make('bun-test')
-  const dest = path.join(dir, 'build/dsh-our-free-model-bun/ipkg-bun/dsh-our-free-model-bun/usr/lib/ourfreemodel/bin/bun')
-  assert.equal((await fs.stat(dest)).mode & 0o777, 0o755)
-  assert.equal(await fs.readFile(dest, 'utf8'), 'bun-fixture')
-})
-
 test('升级迁移保留旧 API 端口与回环绑定，避开双端口冲突，重复运行不覆盖用户设置', async t => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ourfreemodel-migrate-test-'))
   t.after(() => fs.rm(dir, { recursive: true, force: true }))
