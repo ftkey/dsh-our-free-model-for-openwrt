@@ -309,11 +309,13 @@ jobs:
           dsh-our-free-model-for-openwrt ${pkgver}（${PACKAGE_FORMAT}，ImmortalWrt snapshot SDK）
 
           arm64-ipq60xx：太乙 ER1 / qualcommax-ipq60xx；amd64：x86/64。
-          每个 ZIP 含主程序与 Bun 运行时（dsh-our-free-model-bun）两个软件包、
+          每个 ZIP 含主程序与可选的 Bun 运行时（dsh-our-free-model-bun）两个软件包、
           SHA256SUMS、SDK 配置、SDK 校验列表及源提交信息。
-          免费模型车道需要 Bun 运行时包，请同时安装（先装 Bun 包）：
-            apk add --allow-untrusted ./dsh-our-free-model-bun-*.apk ./dsh-our-free-model-for-openwrt-*.apk
-            opkg install ./dsh-our-free-model-bun_*.ipk ./dsh-our-free-model-for-openwrt_*.ipk
+          Bun 包不随主程序强制安装；使用 OpenCode 免费模型车道时再单独安装：
+            apk add --allow-untrusted ./dsh-our-free-model-for-openwrt-*.apk
+            apk add --allow-untrusted ./dsh-our-free-model-bun-*.apk
+            opkg install ./dsh-our-free-model-for-openwrt_*.ipk
+            opkg install ./dsh-our-free-model-bun_*.ipk
           需要固件源提供 Node.js 22.19+ 或 24+。APK 使用 apk 安装；IPK 使用 opkg 安装。
           snapshot SDK 与自定义 ROM 的依赖版本可能不同，请以设备上的依赖检查为准。
 
