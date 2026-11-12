@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=dsh-our-free-model-for-openwrt
 PKG_VERSION:=$(shell python3 -c 'import json; print(json.load(open("$(CURDIR)/payload/PORT-VERSION.json"))["version"])')
-PKG_RELEASE:=5
+PKG_RELEASE:=6
 PKG_LICENSE:=MIT
 PKG_LICENSE_FILES:=LICENSE
 PKG_MAINTAINER:=ftkey
@@ -21,8 +21,8 @@ endef
 define Package/$(PKG_NAME)/description
   Our Free Model standalone Node.js service with an OpenAI-compatible API
   and a local web management UI. Requires Node.js 22.19+ or 24+.
-  Installs the optional dsh-our-free-model-bun package for the OpenCode
-  free inference lane.
+  The optional dsh-our-free-model-bun package or the LuCI page can provide
+  the Bun runtime used by the OpenCode free inference lane.
 endef
 
 define Package/$(PKG_NAME)/conffiles
@@ -46,6 +46,7 @@ endef
 define Package/$(PKG_NAME)/install
 	$(INSTALL_DIR) $(1)/usr/lib/ourfreemodel
 	$(CP) $(PKG_BUILD_DIR)/payload/. $(1)/usr/lib/ourfreemodel/
+	$(INSTALL_DATA) ./scripts/bun-assets.json $(1)/usr/lib/ourfreemodel/bun-assets.json
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) ./files/etc/init.d/ourfreemodel $(1)/etc/init.d/ourfreemodel
 	$(INSTALL_DIR) $(1)/etc/config

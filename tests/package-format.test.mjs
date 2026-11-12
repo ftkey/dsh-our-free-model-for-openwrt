@@ -17,6 +17,7 @@ const mainFiles = [
   'etc/ourfreemodel-access.json', 'etc/ourfreemodel-migrated',
   'usr/lib/ourfreemodel-access/cli.mjs',
   'usr/lib/ourfreemodel/packages/standalone/service.mjs',
+  'usr/lib/ourfreemodel/bun-assets.json',
   'usr/libexec/rpcd/ourfreemodel',
   'usr/share/luci/menu.d/luci-app-ourfreemodel.json',
   'usr/share/rpcd/acl.d/luci-app-ourfreemodel.json',

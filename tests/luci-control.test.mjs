@@ -124,7 +124,7 @@ test('LuCI 菜单和 ACL 将密码与服务控制限制为写权限，未开放�
   assert.equal(menu['admin/services/ourfreemodel'].title, 'OurFreeModel')
   const acl = JSON.parse(await fs.readFile(new URL('files/usr/share/rpcd/acl.d/luci-app-ourfreemodel.json', root)))['luci-app-ourfreemodel']
   assert.deepEqual(acl.read.ubus.ourfreemodel, ['status'])
-  assert.deepEqual(acl.write.ubus.ourfreemodel, ['password', 'reset_password', 'set_password', 'service'])
+  assert.deepEqual(acl.write.ubus.ourfreemodel, ['password', 'reset_password', 'set_password', 'service', 'bun_install', 'bun_remove'])
   assert.deepEqual(acl.write.uci, ['ourfreemodel'])
   assert.equal(acl.write.file, undefined)
 })

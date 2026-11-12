@@ -7,7 +7,7 @@
     },
     "write": {
       "uci": ["ourfreemodel"],
-      "ubus": { "ourfreemodel": ["password", "reset_password", "set_password", "service"] }
+      "ubus": { "ourfreemodel": ["password", "reset_password", "set_password", "service", "bun_install", "bun_remove"] }
     }
   }
 }

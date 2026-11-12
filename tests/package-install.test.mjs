@@ -41,8 +41,9 @@ test:
     assert.equal((await fs.stat(path.join(dest, file))).mode & 0o777, mode, file)
     assert.deepEqual(await fs.readFile(path.join(dest, file)), await fs.readFile(path.join(repo, 'files', file)))
   }
-  for (const module of ['api', 'bind', 'cli', 'control', 'gateway', 'password', 'rpc', 'migrate']) await fs.access(path.join(dest, `usr/lib/ourfreemodel-access/${module}.mjs`))
+  for (const module of ['api', 'bind', 'bun', 'cli', 'control', 'gateway', 'password', 'rpc', 'migrate']) await fs.access(path.join(dest, `usr/lib/ourfreemodel-access/${module}.mjs`))
   await fs.access(path.join(dest, 'usr/lib/ourfreemodel/packages/standalone/service.mjs'))
+  assert.deepEqual(await fs.readFile(path.join(dest, 'usr/lib/ourfreemodel/bun-assets.json')), await fs.readFile(path.join(repo, 'scripts', 'bun-assets.json')))
 })
 
 test('Bun 运行时包安装配方输出可执行文件并读取统一版本', async t => {

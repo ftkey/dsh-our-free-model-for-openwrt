@@ -2,13 +2,18 @@ import fs from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { loadCredential, loadSecret, randomPassword, removeSecret, saveCredential, saveSecret } from './password.mjs'
+import { DEFAULT_BINARY as BUN_BINARY, DEFAULT_MANIFEST as BUN_MANIFEST, DEFAULT_JOB as BUN_JOB,
+  bunStatus, removeBun, startBunInstall } from './bun.mjs'
 
 const execute = promisify(execFile)
-export const METHODS = { status: {}, password: {}, reset_password: {}, set_password: { password: '', confirmation: '' }, service: { action: '' } }
+export const METHODS = { status: {}, password: {}, reset_password: {}, set_password: { password: '', confirmation: '' },
+  service: { action: '' }, bun_install: {}, bun_remove: {} }
 
 export function createControl({ credentialFile = '/etc/ourfreemodel-access.json', secretFile = '/etc/ourfreemodel-webui-secret',
   stateFile = '/var/run/ourfreemodel/status.json', versionFile = '/usr/lib/ourfreemodel/PORT-VERSION.json',
+  bun = {}, startBun = startBunInstall,
   run = (file, args) => execute(file, args, { timeout: 15000, maxBuffer: 65536 }) } = {}) {
+  const bunOptions = { binaryFile: BUN_BINARY, manifestFile: BUN_MANIFEST, jobFile: BUN_JOB, ...bun }
   const reload = async () => {
     try { await run('/etc/init.d/ourfreemodel', ['reload_password']); return true } catch { return false }
   }
@@ -28,6 +33,7 @@ export function createControl({ credentialFile = '/etc/ourfreemodel-access.json'
         passwordVisible: Boolean(await loadSecret(secretFile)),
         startedAt: current ? runtime.startedAt : null, dataDir: runtime.dataDir ?? '',
         error: runtime.error ?? '', api: endpoint('api'), web: endpoint('web'),
+        bun: await bunStatus(bunOptions),
       }
     },
     // 供 LuCI 展示并复制初始随机密码；手动设置的密码不留明文，返回空字符串。
@@ -52,6 +58,14 @@ export function createControl({ credentialFile = '/etc/ourfreemodel-access.json'
     async service({ action }) {
       if (!['start', 'stop', 'restart', 'enable', 'disable'].includes(action)) throw new Error('不支持的服务操作')
       try { await run('/etc/init.d/ourfreemodel', [action]) } catch { throw new Error('服务操作失败，请检查系统日志') }
+      return { ok: true }
+    },
+    // 下载在独立进程中完成，避免大文件超出 rpcd 调用时长；前端轮询 status 获取进度。
+    async bun_install() {
+      return startBun(bunOptions)
+    },
+    async bun_remove() {
+      await removeBun(bunOptions)
       return { ok: true }
     },
   }

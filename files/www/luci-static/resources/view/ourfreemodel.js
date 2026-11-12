@@ -12,6 +12,10 @@ var callService = rpc.declare({ object: 'ourfreemodel', method: 'service', param
 var callPassword = rpc.declare({ object: 'ourfreemodel', method: 'set_password', params: ['password', 'confirmation'], expect: { '': {} }, reject: true });
 var callSecret = rpc.declare({ object: 'ourfreemodel', method: 'password', expect: { '': {} }, reject: true });
 var callRandom = rpc.declare({ object: 'ourfreemodel', method: 'reset_password', expect: { '': {} }, reject: true });
+var callBunInstall = rpc.declare({ object: 'ourfreemodel', method: 'bun_install', expect: { '': {} }, reject: true });
+var callBunRemove = rpc.declare({ object: 'ourfreemodel', method: 'bun_remove', expect: { '': {} }, reject: true });
+
+var bunActiveStates = ['starting', 'downloading', 'verifying', 'extracting'];
 
 function copyText(text) {
 	if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text);
@@ -107,6 +111,61 @@ return view.extend({
 		});
 	},
 
+	bunBusy: function(bun) {
+		return Boolean(bun && bun.job && bunActiveStates.indexOf(bun.job.state) !== -1);
+	},
+
+	bunStatusText: function(bun) {
+		if (!bun) return _('未知');
+		if (this.bunBusy(bun)) {
+			var percent = bun.job.total ? Math.min(100, Math.round(bun.job.received / bun.job.total * 100)) : null;
+			return _('正在下载并安装') + (percent === null ? '…' : ' ' + percent + '%');
+		}
+		if (bun.installed) {
+			var parts = [_('已安装')];
+			if (bun.version) parts.push('v' + bun.version);
+			if (bun.size) parts.push(Math.round(bun.size / 1048576) + ' MiB');
+			return parts.join(' · ');
+		}
+		if (bun.job && bun.job.state === 'error') return _('未安装') + _('；上次安装失败：') + bun.job.error;
+		if (bun.error) return _('未安装') + _('；') + bun.error;
+		return _('未安装（仅 OpenCode 免费车道需要）');
+	},
+
+	installBun: function(ev) {
+		var self = this;
+		return callBunInstall().then(function(result) {
+			if (result.started === false) ui.addNotification(null, E('p', {}, _('Bun 正在下载，请等待完成。')), 'info');
+			else ui.addNotification(null, E('p', {}, _('已开始下载 Bun 运行时，完成后会自动启用。')), 'info');
+			return self.refreshStatus();
+		}).catch(function(error) {
+			ui.addNotification(null, E('p', {}, error.message), 'error');
+		});
+	},
+
+	removeBun: function(ev) {
+		var self = this;
+		var submit = E('button', { 'class': 'btn cbi-button cbi-button-negative', click: function() {
+			submit.disabled = true;
+			return callBunRemove().then(function(result) {
+				if (!result.ok) throw new Error(result.error || _('移除失败'));
+				ui.hideModal();
+				ui.addNotification(null, E('p', {}, _('已移除 Bun 运行时，OpenCode 免费车道将不可用。')), 'info');
+				return self.refreshStatus();
+			}).catch(function(error) {
+				ui.addNotification(null, E('p', {}, error.message), 'error');
+			}).finally(function() { submit.disabled = false; });
+		} }, _('移除'));
+		ui.showModal(_('移除 Bun 运行时'), [
+			E('p', {}, _('将删除 /usr/lib/ourfreemodel/bin/bun。其他模型通道不受影响，OpenCode 免费车道会提示缺少 Bun。')),
+			E('p', {}, _('如果 Bun 是通过软件包安装的，建议到「系统 → 软件包」卸载 dsh-our-free-model-bun，以同步包管理器元数据。')),
+			E('div', { 'class': 'right' }, [
+				E('button', { 'class': 'btn', click: function() { ui.hideModal(); } }, _('取消')),
+				' ', submit
+			])
+		]);
+	},
+
 	// 启动与停止互斥、开机自启与取消自启互斥：只显示当前可执行的那一组。
 	drawActions: function(node, status) {
 		var self = this;
@@ -117,6 +176,16 @@ return view.extend({
 		var buttons = actions.map(function(item) {
 			return E('button', { 'class': 'btn cbi-button' + (item[2] ? ' ' + item[2] : ''), click: ui.createHandlerFn(self, 'serviceAction', item[0]) }, item[1]);
 		});
+		var bun = status.bun || {};
+		if (this.bunBusy(bun)) {
+			buttons.push(E('button', { 'class': 'btn cbi-button', disabled: true }, _('Bun 下载中…')));
+		} else if (bun.installed) {
+			buttons.push(E('button', { 'class': 'btn cbi-button cbi-button-negative', click: ui.createHandlerFn(this, 'removeBun') }, _('移除 Bun')));
+		} else if (bun.available === false) {
+			buttons.push(E('button', { 'class': 'btn cbi-button', disabled: true }, _('当前架构不支持 Bun')));
+		} else {
+			buttons.push(E('button', { 'class': 'btn cbi-button cbi-button-action', click: ui.createHandlerFn(this, 'installBun') }, _('下载并安装 Bun')));
+		}
 		buttons.push(E('button', { 'class': 'btn cbi-button cbi-button-action', click: ui.createHandlerFn(this, 'resetRandomPassword') }, _('重置密码')));
 		buttons.push(E('button', { 'class': 'btn cbi-button', click: ui.createHandlerFn(this, 'resetPassword') }, _('设置密码')));
 		L.dom.content(node, buttons);
@@ -175,6 +244,7 @@ return view.extend({
 			row(_('服务状态'), status.running ? _('运行中') : _('已停止')),
 			row(_('开机自启'), status.autostart ? _('已启用') : _('未启用')),
 			row(_('版本 / Node.js'), (status.version || '—') + ' / ' + (status.nodeVersion || '—')),
+			row(_('Bun 运行时'), this.bunStatusText(status.bun)),
 			row(_('WebUI 管理密码'), passwordCell),
 			row(_('WebUI 地址'), web ? E('a', { href: web, target: '_blank', rel: 'noopener noreferrer' }, _('打开自带 WebUI') + ' · ' + web) : _('未启动')),
 			row(_('模型 API Base URL'), api ? E('code', {}, api + '/v1') : _('未启动')),

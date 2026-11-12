@@ -18,6 +18,7 @@ for (const file of ['/usr/lib/ourfreemodel', '/usr/lib/ourfreemodel-access', '/e
   await assert.rejects(fs.access(file), { code: 'ENOENT' }, `拒绝覆盖现有安装：${file}`)
 }
 await fs.cp(path.join(repo, 'payload'), '/usr/lib/ourfreemodel', { recursive: true })
+await fs.copyFile(path.join(repo, 'scripts/bun-assets.json'), '/usr/lib/ourfreemodel/bun-assets.json')
 await fs.cp(path.join(repo, 'files'), '/', { recursive: true })
 for (const file of ['/etc/init.d/ourfreemodel', '/usr/libexec/rpcd/ourfreemodel']) await fs.chmod(file, 0o755)
 await fs.chmod('/etc/ourfreemodel-access.json', 0o600)
