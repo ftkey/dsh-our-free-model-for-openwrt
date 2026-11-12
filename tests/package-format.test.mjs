@@ -15,6 +15,7 @@ const mainFiles = [
   'etc/init.d/ourfreemodel', 'etc/config/ourfreemodel',
   'etc/ourfreemodel-access.json', 'etc/ourfreemodel-migrated',
   'usr/lib/ourfreemodel-access/cli.mjs',
+  'usr/lib/ourfreemodel-access/bun.mjs',
   'usr/lib/ourfreemodel/packages/standalone/service.mjs',
   'usr/lib/ourfreemodel/bun-assets.json',
   'usr/libexec/rpcd/ourfreemodel',
