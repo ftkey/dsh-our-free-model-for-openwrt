@@ -26,10 +26,10 @@ ARM64 目标依据 [ER1-WRT-CI 的 ROM 配置](https://github.com/ftkey/ER1-WRT-
 1. 将**本目录内容**放在新仓库根目录，确保包含隐藏的 `.github/`、根 `Makefile`、`files/` 和 `payload/`。不要将整个项目目录嵌套一层上传，也不要上传 `dist/`。
 2. 推送到 `main` **不会**自动触发编译；需要编译时在 **Actions → Build APK / IPK → Run workflow** 手动运行（默认勾选 `sync_upstream`，会先同步上游），或推送 `v*` 标签。PR 只构建对应提交。定时运行同样会同步上游。
 3. 手动运行时选择「打包格式」：`apk` 或 `ipk`，默认 `apk`。定时和标签构建默认使用 APK。
-4. 编译完成后下载 Artifacts 中对应格式、平台的 ZIP，如 `dsh-our-free-model-for-openwrt-ipk-arm64-ipq60xx`。每个平台包含所选格式的软件包、`SHA256SUMS`、对应的元数据文件、`PACKAGE-FORMAT`、`SDK.config`、SDK 下载校验列表、移植版本信息及源提交 SHA。
+4. 编译完成后下载 Artifacts 中对应格式、平台的 ZIP，如 `dsh-our-free-model-for-openwrt-ipk-arm64-ipq60xx`。每个平台包含主程序与 `dsh-our-free-model-bun` 两个软件包、`SHA256SUMS`、对应的元数据文件（`APK-METADATA.txt`/`IPK-METADATA.txt` 与 `BUN-METADATA.txt`）、`PACKAGE-FORMAT`、`SDK.config`、SDK 下载校验列表、移植版本信息及源提交 SHA。
 5. 需要发布到 Releases 时，手动运行默认勾选 `publish`。发布标签按包版本命名，如 `apk-2.7.2-r5` 或 `ipk-2.7.2-r5`（`<格式>-<上游版本>-r<发布号>`，来自 `payload/PORT-VERSION.json` 与 `Makefile` 的 `PKG_RELEASE`）；同一版本重复编译会覆盖同一个 Release，不新增标签。该标签不匹配 `v*`，不会反过来触发构建。也可推送 `v*` 标签，此时直接使用该标签名。取消勾选 `publish` 则只上传 Artifact。无需配置额外 Secret，发布使用仓库内置 `GITHUB_TOKEN`。
 
-软件包使用 SDK 命名规则，例如 `dsh-our-free-model-for-openwrt-2.7.2-r4.apk` 或 `dsh-our-free-model-for-openwrt_2.7.2-r4_all.ipk`，实际版本以 Artifact 为准。载荷是纯 JS，配方使用 `PKGARCH:=all`；仍分别使用两个平台 SDK 处理依赖和验证，产物按平台分开保存。不会打包 Node.js，需要从固件软件源安装。
+软件包使用 SDK 命名规则，例如 `dsh-our-free-model-for-openwrt-<版本>-r<发布号>.apk` 或 `dsh-our-free-model-for-openwrt_<版本>-r<发布号>_all.ipk`，实际版本以 Artifact 为准。每次构建同时产出主程序与 `dsh-our-free-model-bun`（Bun 运行时，按目标架构打包，解压后约 95 MiB），主程序依赖 Bun 包。主程序载荷是纯 JS，配方使用 `PKGARCH:=all`；Bun 包使用目标架构。两个平台仍分别使用各自的 SDK 处理依赖和验证，产物按平台分开保存。不会打包 Node.js，需要从固件软件源安装。
 
 ## 自动同步上游
 
@@ -62,8 +62,8 @@ apk --print-arch
 将 ZIP 解压后的 APK 上传到路由器，再执行：
 
 ```sh
-# 文件名按实际下载结果替换
-apk add --allow-untrusted ./dsh-our-free-model-for-openwrt-2.7.2-r4.apk
+# 文件名按实际下载结果替换；主程序依赖 Bun 运行时，两者一起安装
+apk add --allow-untrusted ./dsh-our-free-model-bun-1.4.4-r1.apk ./dsh-our-free-model-for-openwrt-2.8.3-r4.apk
 /etc/init.d/ourfreemodel enable
 /etc/init.d/ourfreemodel start
 # 首次安装会自动生成 16 位随机 WebUI 密码，在 LuCI → 服务 → OurFreeModel 中查看并复制。
@@ -77,12 +77,26 @@ APK 用于采用 `apk` 的固件；IPK 用于采用 `opkg` 的固件。IPK 安�
 
 ```sh
 opkg update
-opkg install ./dsh-our-free-model-for-openwrt_2.7.2-r4_all.ipk
+opkg install ./dsh-our-free-model-bun_*.ipk ./dsh-our-free-model-for-openwrt_*.ipk
 ```
+
+免费模型车道需要 Bun 运行时，升级主程序时应同时升级 Bun 包；单独安装主程序会因缺少依赖被拒绝。
 
 选择 IPK 不会降低运行时要求，仍需要 Node.js 22.19+ 或 24+。部分旧版固件软件源只有 Node.js 20，必须先解决匹配的 Node 依赖；snapshot SDK 生成的 IPK 也需要与目标固件的依赖 ABI 匹配。
 
 这是独立 SDK 构建的第三方 APK，ROM 默认不信任其签名，因此安装时使用 `--allow-untrusted`。依赖无法满足时先核对 ROM 软件源；不要强制跳过 Node.js 依赖。旧 `mkapk.py` 手工生成的 `dist/*.apk` 不属于 SDK 产物，请重新通过 Actions 编译；该入口现已停用。
+
+### 免费模型车道与 Bun
+
+上游 2.8.x 的 OpenCode 免费推理通道要求本机 Bun；用 Node 通道请求会被上游按非 OpenCode 客户端限流（返回 “Free usage limit reached”）。本仓库单独构建 `dsh-our-free-model-bun`，把官方 Bun musl 运行时安装到 `/usr/lib/ourfreemodel/bin/bun`，并由主程序依赖。相关 UCI 配置：
+
+```sh
+# auto（默认）：找到 Bun 就用 Bun；bun：强制 Bun；node：强制旧 Node 通道（会触发上游限流）
+uci set ourfreemodel.main.free_transport='auto'
+uci set ourfreemodel.main.bun_path='/usr/lib/ourfreemodel/bin/bun'
+uci commit ourfreemodel
+/etc/init.d/ourfreemodel restart
+```
 
 服务入口为 `/usr/lib/ourfreemodel-access/cli.mjs`。上游运行时只监听本机临时端口；面向用户提供两个独立入口。`/etc/config/ourfreemodel`、`/etc/ourfreemodel-access.json` 声明为升级保留配置，均不含明文密码。`/etc/ourfreemodel-access.json` 保存 WebUI 密码的 scrypt 随机盐和哈希；密码由随机生成时，另一份明文保存在 `/etc/ourfreemodel-webui-secret`（`0600`，仅 root 可读），供 LuCI 显示和复制，手动设置密码时会删除该文件。首次安装或密码文件缺失时自动生成 16 位随机密码，因此 WebUI 开箱即可登录；API 始终独立运行，不依赖 WebUI 密码。
 
@@ -140,8 +154,10 @@ uci commit ourfreemodel
 
 ```text
 .github/workflows/Build-APK.yml  定时同步、编译与可选发布
-Makefile                       OpenWrt 软件包配方
-scripts/build-package.sh        APK/IPK SDK 编译、格式校验及产物收集
+Makefile                       OpenWrt 主程序配方（依赖 Bun 包）
+scripts/bun-assets.json        Bun 版本与两架构官方 musl 归档 SHA256
+openwrt/dsh-our-free-model-bun/  Bun 运行时软件包配方
+scripts/build-package.sh        APK/IPK SDK 编译、格式校验及产物收集（主程序 + Bun）
 scripts/build-apk.sh            保留原 APK 构建命令
 scripts/inspect-ipk.py          IPK 控制信息与安装内容校验
 scripts/sync-upstream.sh        检测上游提交、刷新载荷及更新发布号
@@ -183,7 +199,7 @@ bash scripts/build-package.sh /path/to/sdk ./dist qualcommax ipq60xx apk
 bash scripts/build-package.sh /path/to/sdk ./dist qualcommax ipq60xx ipk
 ```
 
-也可把根 `Makefile`、`files/`、`payload/` 复制到 ROM 源码的 `package/dsh-our-free-model-for-openwrt/`，在 ROM 配置中启用 `CONFIG_PACKAGE_dsh-our-free-model-for-openwrt=y`。`make-ipk.sh <SDK目录> <输出目录> <target> <subtarget>` 现在也转到同一 SDK 配方，不再手工拼装安装包。
+也可把根 `Makefile`、`files/`、`payload/` 和 `openwrt/dsh-our-free-model-bun/` 复制到 ROM 源码的 `package/` 下（Bun 包需先把 `scripts/bun-assets.json` 对应架构的官方 musl 归档解压为 `files/bun`），并在 ROM 配置中同时启用 `CONFIG_PACKAGE_dsh-our-free-model-for-openwrt=y` 与 `CONFIG_PACKAGE_dsh-our-free-model-bun=y`。`make-ipk.sh <SDK目录> <输出目录> <target> <subtarget>` 现在也转到同一 SDK 配方，不再手工拼装安装包。
 
 自测命令：
 

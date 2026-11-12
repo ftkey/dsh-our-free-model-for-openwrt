@@ -1,0 +1,15 @@
+{
+  "version": "1.4.4",
+  "assets": {
+    "aarch64": {
+      "file": "bun-linux-aarch64-musl.zip",
+      "sha256": "57f01b02ac7113c61c935f28f38c2eab849e3c970dab21f8b640a87b1ef65009",
+      "binary": "bun-linux-aarch64-musl/bun"
+    },
+    "x64": {
+      "file": "bun-linux-x64-musl.zip",
+      "sha256": "a5a8ccc5e74dcb883fe974f125a7bdb3b41e5195ed1b870e73f17effd3eb2b2d",
+      "binary": "bun-linux-x64-musl/bun"
+    }
+  }
+}

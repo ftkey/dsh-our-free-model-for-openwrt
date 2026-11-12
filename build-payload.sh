@@ -25,6 +25,18 @@ for file in engine.json LICENSE NOTICE.md; do
 done
 rsync -a "$SRC_REPO/locale" "$STAGING/"
 cp "$SRC_REPO/package.json" "$SRC_REPO/LICENSE" "$SRC_REPO/icon.svg" "$STAGING/"
+# 上游时常忘记升 packages/standalone 的版本，导致 WebUI 显示旧版本号；同步时强制对齐。
+node --input-type=commonjs - "$STAGING" <<'NODE'
+const fs = require('node:fs')
+const path = require('node:path')
+const root = process.argv[2]
+const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version
+const file = path.join(root, 'packages/standalone/package.json')
+const manifest = fs.readFileSync(file, 'utf8')
+const next = manifest.replace(/("version"\s*:\s*")[^"]*(")/, `$1${version}$2`)
+if (next === manifest) throw new Error('无法写入 standalone 版本号')
+fs.writeFileSync(file, next)
+NODE
 SOURCE_SHA="$(git -C "$SRC_REPO" rev-parse HEAD)"
 SOURCE_SHA="$SOURCE_SHA" node --input-type=commonjs - "$SRC_REPO" > "$STAGING/PORT-VERSION.json" <<'NODE'
 const fs = require('node:fs')
