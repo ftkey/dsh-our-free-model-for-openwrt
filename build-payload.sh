@@ -26,6 +26,7 @@ done
 rsync -a "$SRC_REPO/locale" "$STAGING/"
 cp "$SRC_REPO/package.json" "$SRC_REPO/LICENSE" "$SRC_REPO/icon.svg" "$STAGING/"
 # 上游时常忘记升 packages/standalone 的版本，导致 WebUI 显示旧版本号；同步时强制对齐。
+# 若上游已对齐，replace 结果不变，不能当成写入失败。
 node --input-type=commonjs - "$STAGING" <<'NODE'
 const fs = require('node:fs')
 const path = require('node:path')
@@ -33,6 +34,9 @@ const root = process.argv[2]
 const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version
 const file = path.join(root, 'packages/standalone/package.json')
 const manifest = fs.readFileSync(file, 'utf8')
+const current = JSON.parse(manifest).version
+if (typeof current !== 'string') throw new Error('无法写入 standalone 版本号')
+if (current === version) process.exit(0)
 const next = manifest.replace(/("version"\s*:\s*")[^"]*(")/, `$1${version}$2`)
 if (next === manifest) throw new Error('无法写入 standalone 版本号')
 fs.writeFileSync(file, next)
