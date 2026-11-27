@@ -75,6 +75,7 @@ const CODE_VERDICTS = Object.fromEntries([
   [['transport'], policy('unavailable', 'transient', TRANSIENT_COOLDOWN_MS, true)],
   [['server', 'stream_cut', 'empty_response'], transientServer],
   [['client_error'], policy('invalid_request', 'request', 0)],
+  [['content_blocked'], policy('invalid_request', 'request', 0)],
   [['invalid_credential', 'invalid_api_key', 'unauthorized'], accountAuth],
   [['permission_denied', 'forbidden'], accountPermission],
   [['rate_limit'], accountRate],

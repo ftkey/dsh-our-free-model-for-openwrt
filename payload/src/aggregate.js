@@ -673,8 +673,12 @@ function chatFrames(payload, model) {
   }
   const content = typeof message.content === 'string' ? message.content
     : Array.isArray(message.content) ? message.content.map(part => (typeof part?.text === 'string' ? part.text : '')).join('') : ''
-  if (content !== '') {
+  const refusal = typeof message.refusal === 'string' ? message.refusal : ''
+  if (content !== '' && content !== refusal) {
     frames.push(JSON.stringify({ ...head, choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: null }] }))
+  }
+  if (refusal !== '') {
+    frames.push(JSON.stringify({ ...head, choices: [{ index: 0, delta: { role: 'assistant', refusal }, finish_reason: null }] }))
   }
   let index = 0
   for (const call of Array.isArray(message.tool_calls) ? message.tool_calls : []) {
@@ -756,8 +760,25 @@ function responsesFrames(payload, model) {
     }
     if (type === 'message') {
       const content = Array.isArray(item?.content) ? item.content : []
-      const delta = content.map(part => (typeof part?.text === 'string' ? part.text : '')).join('')
-      if (delta !== '') frames.push(JSON.stringify({ type: 'response.output_text.delta', item_id: text(item?.id), output_index: outputIndex, delta }))
+      const refusalTexts = new Set(content
+        .filter(part => part?.type === 'refusal' && typeof part.refusal === 'string' && part.refusal !== '')
+        .map(part => part.refusal))
+      const emittedRefusals = new Set()
+      const emitRefusal = delta => {
+        if (delta === '' || emittedRefusals.has(delta)) return
+        emittedRefusals.add(delta)
+        frames.push(JSON.stringify({ type: 'response.refusal.delta', item_id: text(item?.id), output_index: outputIndex, delta }))
+      }
+      for (const part of content) {
+        if (part?.type === 'refusal') {
+          emitRefusal(typeof part.refusal === 'string' ? part.refusal : '')
+          continue
+        }
+        const delta = typeof part?.text === 'string' ? part.text : ''
+        if (delta === '') continue
+        if (refusalTexts.has(delta)) emitRefusal(delta)
+        else frames.push(JSON.stringify({ type: 'response.output_text.delta', item_id: text(item?.id), output_index: outputIndex, delta }))
+      }
       return
     }
     if (type === 'function_call') {

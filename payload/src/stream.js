@@ -16,7 +16,7 @@
  */
 
 import crypto from 'node:crypto'
-import { classifyFailure } from './http.js'
+import { UpstreamError, classifyFailure } from './http.js'
 import { restoreToolName } from './upstream.js'
 
 /** DeepSeek v4-family models occasionally leak internal DSML control markup
@@ -497,6 +497,9 @@ function feedResponses(sink, event, onFinish, renameMap) {
         : event.type === 'response.incomplete' ? 'incomplete'
           : event.type === 'response.completed' ? 'completed' : undefined)
       const incomplete = response?.incomplete_details?.reason
+      if (incomplete === 'content_filter') {
+        throw new UpstreamError('our free model response was blocked by the content filter', 'CONTENT_BLOCKED')
+      }
       onFinish(undefined, 'finish', incomplete === 'max_output_tokens' ? 'length' : status === 'completed' ? 'stop' : status)
       return
     }
