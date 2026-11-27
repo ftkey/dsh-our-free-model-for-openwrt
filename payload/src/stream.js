@@ -193,8 +193,8 @@ class BlockSink {
    *
    * Some gateways split `tool_calls[].function.name` across delta frames — and
    * resolving every fragment on arrival used to fold a half name into a wrong
-   * or unknown tool, surfacing ghost calls (opencode2api v1.4.7 buffers the
-   * same way). The raw name accumulates here and resolves through
+   * or unknown tool, surfacing ghost calls. Buffering the fragments until the
+   * arguments start is the behaviour measured as correct on this lane. The raw name accumulates here and resolves through
    * {@link resolveRawName} once the call's arguments start or the block closes;
    * until then the emitted deltas simply carry no name, which downstream
    * consumers already tolerate (arguments can legitimately precede a name).
@@ -388,6 +388,10 @@ function feedChat(sink, payload, renameMap, onFinish) {
     const reasoning = reasoningOf(delta)
     if (reasoning !== undefined) sink.reasoning('r', reasoning)
     if (typeof delta.content === 'string') sink.text('t', delta.content)
+    // A refusal is a real answer: the Chat wire carries it in `delta.refusal`
+    // rather than `delta.content`, and reading only the latter closed the turn
+    // with zero blocks, which the adapter reports as a retryable empty answer.
+    if (typeof delta.refusal === 'string' && delta.refusal !== '') sink.text('t', delta.refusal)
     for (const call of delta.tool_calls ?? []) {
       sink.sawToolCall = true
       const key = sink.toolKey(call)
@@ -455,6 +459,12 @@ function feedResponses(sink, event, onFinish, renameMap) {
       return
     case 'response.output_text.delta':
       sink.text(`t${event.output_index}`, event.delta)
+      return
+    // Same answer, same slot: a refusal shares the text key rule so one reply
+    // can never split into two blocks. The paired `response.refusal.done`
+    // repeats the full string and stays unread — reading it would print twice.
+    case 'response.refusal.delta':
+      if (typeof event.delta === 'string' && event.delta !== '') sink.text(`t${event.output_index}`, event.delta)
       return
     case 'response.reasoning_summary_text.delta':
     case 'response.output_reasoning.text.delta':
@@ -631,6 +641,7 @@ function carriesDelta(payload, wire) {
     // first *visible* one, which on a reasoning-heavy model is minutes after
     // decoding began.
     return (typeof delta.content === 'string' && delta.content !== '')
+      || (typeof delta.refusal === 'string' && delta.refusal !== '')
       || reasoningOf(delta) !== undefined
       || (delta.tool_calls ?? []).length > 0
   })

@@ -4,8 +4,14 @@ import path from 'node:path'
 import net from 'node:net'
 import crypto from 'node:crypto'
 import { createModelRuntime, createRuntimeStores } from '../../src/core/runtime.js'
+import { ROUTE_MAIN, ROUTE_REGION } from '../../src/adapter.js'
+import { modelAvailability } from '../../src/model-test.js'
+import { STATE } from '../../src/probe.js'
+import { buildModelVisibility, isModelHidden } from '../../src/store.js'
+import { publicModelRows as publicCoreModelRows } from '../../src/core/completion.js'
 import { generateKey, rankLanAddresses, startForwardServer, startLanRelay } from '../../src/forward.js'
 import { isLoopbackHost } from '../../src/trust.js'
+import { setFreeLaneProxies, setFreeLaneMaxTries } from '../../src/egress.js'
 import { createManagement } from './management.mjs'
 import { createStandaloneEac } from './eac.mjs'
 import { createChannelRuntime } from './channels/runtime.mjs'
@@ -175,6 +181,27 @@ export async function startStandalone({
     relayRequestedPort = undefined
     await Promise.all([current?.close(), target?.close()])
   }
+  /**
+   * Apply the stored exit pool to the egress layer.
+   *
+   * The pool is module-level state in `src/egress.js`, not a store this service
+   * owns, so it has to be pushed after every settings write and once at startup.
+   * A stored entry that no longer parses is dropped rather than failing the boot:
+   * the lane then falls back to the global outlet.
+   */
+  function applyFreeLaneExits() {
+    const lane = stores.settings.get().freeLane ?? {}
+    const proxies = Array.isArray(lane.proxies) ? lane.proxies : []
+    const legacy = String(lane.proxyUrl ?? '').trim()
+    const effective = proxies.length > 0 ? proxies : (legacy === '' ? [] : [legacy])
+    try {
+      setFreeLaneProxies(effective)
+      setFreeLaneMaxTries(lane.maxTries)
+    } catch (error) {
+      logger.warn?.(`our-free-model standalone: a lane exit address is invalid (${error?.message ?? error}); the lane keeps its current exits`)
+      try { setFreeLaneProxies([]) } catch { /* nothing left to clear */ }
+    }
+  }
   function reconcileRelay() {
     relayChanges = relayChanges.then(async () => {
       const value = stores.settings.get()
@@ -287,13 +314,59 @@ export async function startStandalone({
     })
     channels = await createChannelRuntime({ dataDir, logger, stats: stores.stats })
     const core = runtime
+    const channelRows = () => channels.publicModelRows()
+    const completeCatalog = () => [...core.catalog, ...channelRows()]
+    const completeState = () => {
+      const base = core.state()
+      const catalog = completeCatalog()
+      // Account rows arrive after the core has merged its own lanes. Recompute
+      // account collisions over the core's pre-dedupe family evidence: never
+      // reconstruct that evidence from the deduped public catalog.
+      const familyKeysById = new Map(base.visibility.familyKeysById)
+      for (const row of channelRows()) familyKeysById.set(row.id, null)
+      const visibility = buildModelVisibility(base.settings, familyKeysById)
+      const available = stores.availability.get()
+      const settings = base.settings
+      const expose = settings?.exposeRegionModels !== false
+      const verdictOf = entry => modelAvailability(entry.id, available, Boolean(entry.channel)).availability
+      const probeable = catalog.filter(entry => !entry.channel)
+      const refusedAll = probeable.length > 0 && probeable.every(entry => verdictOf(entry) === STATE.unavailable)
+      const usable = refusedAll ? catalog : catalog.filter(entry => verdictOf(entry) !== STATE.unavailable)
+      const main = []
+      const region = []
+      for (const entry of usable) {
+        if (isModelHidden(entry, settings, visibility)) continue
+        if (verdictOf(entry) !== STATE.regionBlocked) main.push(entry)
+        else if (expose) region.push(entry)
+      }
+      const routableRows = new Set([...main, ...region])
+      const membership = {}
+      if (main.length > 0) membership[ROUTE_MAIN] = [...new Set(main.map(entry => entry.id))]
+      if (region.length > 0) membership[ROUTE_REGION] = [...new Set(region.map(entry => entry.id))]
+      return {
+        ...base,
+        catalog,
+        visibility,
+        membership,
+        routableRows,
+      }
+    }
+    const publicRows = () => {
+      const snapshot = completeState()
+      const coreRoutable = core.catalog.filter(row => snapshot.routableRows.has(row))
+      const coreMembership = { [ROUTE_MAIN]: [...new Set(coreRoutable.map(row => row.id))] }
+      return [
+        ...publicCoreModelRows({ ...snapshot, catalog: coreRoutable, membership: coreMembership }),
+        ...channelRows().filter(row => snapshot.routableRows.has(row)),
+      ]
+    }
     runtime = {
       ...core,
       get egress() { return core.egress },
       get gatewayLatency() { return core.gatewayLatency },
-      get catalog() { return [...core.catalog, ...channels.publicModelRows().map(row => ({ ...row, contextWindow: row.context_window, maxOutput: row.max_tokens }))] },
-      state: () => ({ ...core.state(), catalog: [...core.catalog, ...channels.publicModelRows()] }),
-      publicModelRows: () => [...core.publicModelRows(), ...channels.publicModelRows()],
+      get catalog() { return [...core.catalog, ...channelRows().map(row => ({ ...row, contextWindow: row.context_window, maxOutput: row.max_tokens }))] },
+      state: completeState,
+      publicModelRows: publicRows,
       complete: (request, onChunk) => channels.handles(request.model) ? channels.complete(request, onChunk) : core.complete(request, onChunk),
       async refreshCatalog(options) {
         if (stopped) return
@@ -316,6 +389,10 @@ export async function startStandalone({
         lan: lanState(),
       }),
       onSettingsChanged: async () => {
+        // The free lane's exit pool is module-level state in the egress layer, so
+        // it has to be re-applied after every write — the settings route only
+        // validates and stores.
+        applyFreeLaneExits()
         if (!refreshInFlight) scheduleRefresh()
         await reconcileRelay()
       },
@@ -362,6 +439,7 @@ export async function startStandalone({
       if (settings.get().autoUpdateExtensions === true) void extensions.autoUpdate().catch(() => {})
     }, 6 * 60 * 60 * 1000)
     registryTimer.unref?.()
+    applyFreeLaneExits()
     await reconcileRelay()
 
     function scheduleRefresh() {

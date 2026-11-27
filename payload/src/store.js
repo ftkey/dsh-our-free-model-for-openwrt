@@ -179,12 +179,26 @@ export const SETTINGS_INITIAL = {
    *  probe requests. Since 2.8.1 this cadence also cannot re-fetch the listing
    *  more often than once a listing window (see src/core/runtime.js). */
   probeIntervalMinutes: 15,
-  /** The OpenCode lane's own proxy exit (issue #708's method): when set, this
-   *  lane's requests dial through it instead of the process's global egress,
-   *  which is how a burned per-IP quota window is left behind. Empty means the
-   *  global outlet when one runs, then the HTTP(S)_PROXY environment, then
-   *  direct. Never auto-rotated — the address is the user's own. */
-  freeLane: { proxyUrl: '' },
+  /**
+   * The OpenCode lane's own exit pool (issue #708's method).
+   *
+   * The free tier's usage ceiling is counted per egress IP, so moving this
+   * lane's requests through another exit is the one lever that moves the
+   * counter. One address is not enough: a burned IP answers with a multi-hour
+   * `Retry-After`, and the lane needs somewhere to go within the same turn.
+   *
+   *   `proxies`  one address per entry; `http`/`https`/`socks5`/`socks5h`, and
+   *              a `#pool` (or `pool+`) suffix marks a rotating pool endpoint
+   *              that is never cooled. Empty means the global outlet when one
+   *              runs, then the HTTP(S)_PROXY environment, then direct.
+   *   `maxTries` how many distinct exits one request may walk.
+   *
+   * `proxyUrl` is the pre-pool single-address field, kept so an older settings
+   * file still works: it is folded into `proxies` when the list is empty.
+   * Nothing here rotates on its own — an exit is skipped only after the upstream
+   * said that exit is spent.
+   */
+  freeLane: { proxies: [], proxyUrl: '', maxTries: 3 },
   /** Serve the OpenAI-compatible forward listener for other local harnesses. */
   forward: {
     enabled: false,
@@ -323,11 +337,49 @@ export function validateModelVisibility(patch) {
   return result
 }
 
-export function isModelHidden(entry, settings) {
-  return (Array.isArray(settings?.hiddenModelIds) && settings.hiddenModelIds.includes(entry.id))
-    || (settings?.hideFreeModels === true && (!entry.channel || entry.channel === 'anonymous' || entry.channel === 'kilo'
+/**
+ * Build one lookup index from a settings snapshot and the directory's family
+ * map. Stored ids are deduplicated in their original order. Only ids the
+ * directory has qualified enter a family bucket; every stored id remains
+ * available for exact matching, including rows absent from the current catalog.
+ */
+export function buildModelVisibility(settings, familyKeysById = new Map()) {
+  const storedIds = new Set()
+  const familyKeys = familyKeysById !== null && typeof familyKeysById?.get === 'function' ? familyKeysById : new Map()
+  const hiddenIdsByFamily = new Map()
+  for (const id of Array.isArray(settings?.hiddenModelIds) ? settings.hiddenModelIds : []) {
+    if (!validHiddenModelId(id) || storedIds.has(id)) continue
+    storedIds.add(id)
+    const family = familyKeys.get(id)
+    if (family === null || family === undefined) continue
+    const ids = hiddenIdsByFamily.get(family) ?? []
+    ids.push(id)
+    hiddenIdsByFamily.set(family, ids)
+  }
+  return { storedIds, familyKeysById: familyKeys, hiddenIdsByFamily }
+}
+
+/** Stored hidden ids belonging to this row, never the whole settings array. */
+export function hiddenIdsFor(entry, visibility) {
+  const id = typeof entry?.id === 'string' ? entry.id : ''
+  if (id === '' || !(visibility?.storedIds instanceof Set)) return []
+  const family = visibility.familyKeysById?.get(id)
+  if (family !== null && family !== undefined) {
+    return [...(visibility.hiddenIdsByFamily?.get(family) ?? [])]
+  }
+  return visibility.storedIds.has(id) ? [id] : []
+}
+
+/** Does one of the two group switches hide this row, independently of saved ids? */
+export function isModelHiddenByGroup(entry, settings) {
+  return (settings?.hideFreeModels === true && (!entry?.channel || entry.channel === 'anonymous' || entry.channel === 'kilo'
       || (entry.channel === 'combo' && Array.isArray(entry.lanes) && entry.lanes.length > 0 && entry.lanes.every(lane => lane === 'free'))))
-    || (settings?.hideEacModels === true && entry.channel === 'eac')
+    || (settings?.hideEacModels === true && entry?.channel === 'eac')
+}
+
+export function isModelHidden(entry, settings, visibility) {
+  return hiddenIdsFor(entry, visibility ?? buildModelVisibility(settings)).length > 0
+    || isModelHiddenByGroup(entry, settings)
 }
 
 export const STATS_INITIAL = {

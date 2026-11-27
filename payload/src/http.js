@@ -104,6 +104,12 @@ export function classifyFailure(status, payload, retryAfterMs) {
     ? `the gateway's front proxy answered HTTP ${status} with an HTML error page — usually a WAF or body-size limit in front of the gateway, not your credentials; if this hit a long conversation, its request size is the likely trigger`
     : raw
   const flat = message.toLowerCase()
+  // A refusal delivered inside a 2xx body or an in-stream `error` frame has no
+  // HTTP status to classify by: the envelope's own `type` is the only
+  // machine-readable discriminator left. Statuses that already speak keep
+  // their branches below — 401/403, the 408/425 carve-out, ModelError — so the
+  // type mapping is deliberately limited to a status that carries no verdict.
+  const statusCarriesNoVerdict = status === undefined || status === null || (status >= 200 && status < 300)
   if (type === 'RegionError' || /not available in your country|region/i.test(flat)) {
     return new UpstreamError(message, CODE.region, { status, type })
   }
@@ -152,6 +158,21 @@ export function classifyFailure(status, payload, retryAfterMs) {
   if (status === 401 || status === 403) return new UpstreamError(message, isHtmlPage ? CODE.client : CODE.credential, { status, type })
   if (type === 'ModelError' || /model is unavailable|not supported/.test(flat)) {
     return new UpstreamError(message, CODE.server, { status, type, unavailable: true })
+  }
+  // Only after every dedicated type and description above has passed: a
+  // generic envelope type fills the gap when the status is 2xx or absent. A
+  // dead credential is not retryable, a refused request reproduces itself, and
+  // a spent bucket is a rate limit, so none may fall through to SERVER. The
+  // ordering also keeps a generic `type` from erasing the more specific
+  // reading of the message (model unavailable, free-tier lock, GitHub auth).
+  if (statusCarriesNoVerdict && type === 'rate_limit_error') {
+    return new UpstreamError(message, CODE.quota, { status, type, providerRetryAfterMs: retryAfterMs })
+  }
+  if (statusCarriesNoVerdict && type === 'authentication_error') {
+    return new UpstreamError(message, CODE.credential, { status, type })
+  }
+  if (statusCarriesNoVerdict && type === 'invalid_request_error') {
+    return new UpstreamError(message, CODE.client, { status, type })
   }
   // 4xx is the request's own fault: replaying the identical body reproduces the
   // identical refusal, so it stays outside the harness's retryable set — which
@@ -661,5 +682,45 @@ export async function getJson(path, { session, attributionUserAgent, signal, tim
   } finally {
     clearTimeout(timer)
     signal?.removeEventListener?.('abort', onCallerAbort)
+  }
+}
+
+/** Preserve classified failures across the three local forwarding protocols. */
+export function carryFailure(failure, kind = 'error') {
+  const source = failure && typeof failure === 'object' ? failure : {}
+  const code = kind === 'aborted' ? 'ABORTED' : source.code
+  const status = source.status ?? source.statusCode
+  return {
+    message: typeof source.message === 'string' && source.message ? source.message : kind === 'aborted' ? 'request aborted' : 'our free model failed the turn',
+    ...typeof code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(code) ? { code } : {},
+    ...Number.isInteger(status) && status >= 400 && status <= 599 ? { status } : {},
+    ...Number.isFinite(source.providerRetryAfterMs) && source.providerRetryAfterMs > 0 ? { providerRetryAfterMs: source.providerRetryAfterMs } : {},
+  }
+}
+
+/** Wire error metadata; no arbitrary provider properties are forwarded. */
+export function forwardFailure(outcome, anthropic = false) {
+  const failure = carryFailure(outcome.failure ?? { message: String(outcome.error) })
+  const classes = {
+    INVALID_CREDENTIAL: [401, 'authentication_error'],
+    AUTHORIZATION_REQUIRED: [403, 'permission_error'],
+    LANE_LOCKED: [403, 'permission_error'],
+    REGION_BLOCKED: [403, 'permission_error'],
+    PERMISSION_DENIED: [403, 'permission_error'],
+    QUOTA_EXHAUSTED: [429, 'insufficient_quota'],
+    RATE_LIMIT: [429, 'rate_limit_error'],
+    CLIENT_ERROR: [400, 'invalid_request_error'],
+    ABORTED: [400, 'invalid_request_error'],
+    TIMEOUT: [504, 'server_error'],
+    EAC_UPSTREAM_FAILED: [502, 'server_error'],
+    NO_PROGRESS: [504, 'server_error'],
+  }
+  const byStatus = { 400: 'invalid_request_error', 401: 'authentication_error', 403: 'permission_error', 404: 'invalid_request_error', 429: 'rate_limit_error' }
+  const [fallbackStatus, type] = classes[failure.code] ?? [502, byStatus[failure.status] ?? 'server_error']
+  return {
+    status: failure.status ?? fallbackStatus,
+    error: { message: failure.message, type: anthropic && type === 'server_error' ? 'api_error' : type, ...(failure.code ? { code: failure.code } : {}) },
+    retryAfterMs: failure.providerRetryAfterMs,
+    classified: Boolean(failure.code || failure.status),
   }
 }

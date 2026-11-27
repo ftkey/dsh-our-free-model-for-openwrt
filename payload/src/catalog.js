@@ -24,6 +24,73 @@ import { baseModelId, isResponsesModel } from './upstream.js'
 const ALWAYS_FREE = new Set(['big-pickle', 'union-alpha', 'space-bunny-free'])
 
 /**
+ * Cross-namespace names the directory itself has identified as one model. The
+ * keys are full model names after removing one terminal `-free`/`:free` marker;
+ * values are the shared family key. Names without an entry stay namespaced, so
+ * `vendor-a/shared` and `vendor-b/shared` are not merged by a coincidence of
+ * their last path segment.
+ */
+const FAMILY_ALIASES = new Map([
+  ...['beam', 'opencode/beam', 'reflection/beam'].map(name => [name, 'beam']),
+  ...['nemotron-3.5-lightning', 'opencode/nemotron-3.5-lightning', 'nvidia/nemotron-3.5-lightning']
+    .map(name => [name, 'nemotron-3.5-lightning']),
+  ...['nemotron-3.5-super-vl', 'opencode/nemotron-3.5-super-vl', 'nvidia/nemotron-3.5-super-vl']
+    .map(name => [name, 'nemotron-3.5-super-vl']),
+  ...['big-pickle', 'opencode/big-pickle'].map(name => [name, 'big-pickle']),
+  ...['gpt-oss-20b', 'openai/gpt-oss-20b'].map(name => [name, 'gpt-oss-20b']),
+  ...['longcat-2.5', 'opencode/longcat-2.5'].map(name => [name, 'longcat-2.5']),
+  ...['tidepool-alpha', 'opencode/tidepool-alpha'].map(name => [name, 'tidepool-alpha']),
+  ...['iceman', 'opencode/iceman'].map(name => [name, 'iceman']),
+  ...['flint-40b', 'opencode/flint-40b'].map(name => [name, 'flint-40b']),
+])
+
+function terminalFreeName(id) {
+  const value = typeof id === 'string' ? id : ''
+  if (value === '') return null
+  const terminal = value.slice(value.lastIndexOf('/') + 1)
+  if (terminal === '' || terminal === 'free') return null
+  const stripped = terminal.endsWith('-free') || terminal.endsWith(':free') ? value.slice(0, -5) : value
+  const strippedTerminal = stripped.slice(stripped.lastIndexOf('/') + 1)
+  if (stripped === '' || strippedTerminal === '' || strippedTerminal === 'free') return null
+  return stripped
+}
+
+function catalogFamilyKey(id) {
+  const name = terminalFreeName(id)
+  return name === null ? null : (FAMILY_ALIASES.get(name) ?? name)
+}
+
+/**
+ * The full ids the current directory says may participate in family matching.
+ *
+ * Only the free, anonymous, EAC and Kilo rows are candidates. A full id also
+ * produced by an aggregate, subscription, combo, extension or other row is
+ * ambiguous and therefore omitted: both rows fall back to exact matching. The
+ * map's value is the family key, or null when a terminal `free` segment means
+ * the id may only be matched exactly. This function reads candidate rows alone;
+ * settings, provider prefixes and registries cannot add or remove eligibility.
+ *
+ * @param {Array<object>} candidates - rows before the runtime's id dedupe
+ * @returns {ReadonlyMap<string, string|null>}
+ */
+export function catalogFamilyKeys(candidates) {
+  const eligible = new Set()
+  const foreign = new Set()
+  for (const entry of Array.isArray(candidates) ? candidates : []) {
+    const id = typeof entry?.id === 'string' ? entry.id : ''
+    if (id === '') continue
+    const lane = entry.channel
+    if (lane === undefined || lane === null || lane === 'anonymous' || lane === 'eac' || lane === 'kilo') eligible.add(id)
+    else foreign.add(id)
+  }
+  const keys = new Map()
+  for (const id of eligible) {
+    if (!foreign.has(id)) keys.set(id, catalogFamilyKey(id))
+  }
+  return keys
+}
+
+/**
  * Local capability baseline. `contextWindow`/`maxOutput` are the provider's
  * published capacities; `vision` is what this lane actually accepted under a
  * direct image-input probe, not what a model card claims.
@@ -161,12 +228,37 @@ const FREE_ID_OVERRIDES = {
   },
   // models.dev: 1M window, 131072 output, reasoning_options `toggle` only →
   // no level menu, so the free lane's token ladder applies.
+  // The roster later renamed this id `longcat-2.5-free` (the `-preview` segment
+  // is gone), so both spellings are kept: the old one still answers from cached
+  // catalogs, and a rename upstream must not drop the row to the default.
   'longcat-2.5-preview-free': {
     vision: false, contextWindow: 1048576, maxOutput: 131072,
+  },
+  'longcat-2.5-free': {
+    vision: false, contextWindow: 1048576, maxOutput: 262144,
   },
   // models.dev: 200000/32000, no reasoning_options. The lane accepted a
   // 265360-token prompt, so the window is the served one.
   'big-pickle': { vision: true, contextWindow: 262144, maxOutput: 131072 },
+  // The four ids below were absent from this table while the lane already
+  // served them, so they fell through to 131072/32768 — the 32768 output cap
+  // is what made a ~37k-token conversation fail to compact. Numbers are the
+  // listing's own (2026-11-21) and act as the offline floor.
+  //
+  // `mimo-v2.6-flash-free` is deliberately NOT listed: it already matches the
+  // `^mimo.*v2.6` family row, which carries `canDisableThinking: false` — a
+  // measured fact (its thinking cannot be switched off). An exact-id entry here
+  // would shadow that row and silently re-enable an off-switch the model
+  // ignores.
+  'hy4-flash-free': {
+    vision: true, contextWindow: 1048576, maxOutput: 65536,
+  },
+  'iceman-free': {
+    vision: false, contextWindow: 262144, maxOutput: 131072,
+  },
+  'tidepool-alpha-free': {
+    vision: false, contextWindow: 1048576, maxOutput: 131072,
+  },
 }
 
 /** Human-facing display names, so a raw upstream id never reaches the picker. */
@@ -179,6 +271,11 @@ const DISPLAY_NAMES = {
   'nemotron-3.5-lightning-free': 'Nemotron 3.5 Lightning',
   'deepseek-v4.1-flash-free': 'DeepSeek V4.1 Flash',
   'glm-5.3-flash-free': 'GLM 5.3 Flash',
+  'big-pickle': 'Big Pickle',
+  'hy4-flash-free': 'Hy4 Flash',
+  'iceman-free': 'Iceman',
+  'longcat-2.5-free': 'LongCat 2.5',
+  'tidepool-alpha-free': 'Tidepool Alpha',
 }
 
 /** Ids whose regional availability is known to be egress-dependent. The 2.2
@@ -196,10 +293,80 @@ export function isFreeLane(modelId) {
   return /(?:^|[-_])free(?:$|[-_.])/.test(base)
 }
 
-/** Look up the baseline capacities for one model id. An exact id override for a
- *  model the lane serves today wins over the family-wide pattern. */
-export function capabilitiesFor(modelId) {
+/**
+ * Capacities the upstream listing itself publishes for one row.
+ *
+ * The gateway's `/v1/models` answers with `context_length`, `max_output`,
+ * `reasoning_efforts`, `reasoning` and modality hints — the serving platform's
+ * own numbers, which is the only source that keeps up with a roster that
+ * churns weekly. Returns `null` for a bare id (an older listing, or a row that
+ * carries none of these fields) so the caller falls back to the local table.
+ */
+export function upstreamCapabilities(row) {
+  if (row === null || typeof row !== 'object' || Array.isArray(row)) return null
+  const contextWindow = number(row.context_length) ?? number(row.context_window)
+  const maxOutput = number(row.max_output)
+  const efforts = Array.isArray(row.reasoning_efforts)
+    ? row.reasoning_efforts.filter(level => typeof level === 'string' && level !== '').slice(0, 8)
+    : []
+  if (contextWindow === undefined && maxOutput === undefined && efforts.length === 0) return null
+  const caps = {}
+  if (contextWindow !== undefined) caps.contextWindow = contextWindow
+  if (maxOutput !== undefined) caps.maxOutput = maxOutput
+  if (typeof row.reasoning === 'boolean') caps.reasoning = row.reasoning
+  if (efforts.length > 0) {
+    caps.efforts = efforts
+    // `none` is the wire's off-switch; the listing names it as an effort level.
+    if (efforts.includes('none')) caps.effortOffPatch = { reasoning_effort: 'none' }
+  }
+  const inputs = row?.modalities?.input ?? row?.metadata?.input_modalities
+  if (Array.isArray(inputs)) caps.vision = inputs.includes('image')
+  return caps
+}
+
+/**
+ * Look up the baseline capacities for one model id.
+ *
+ * Resolution order, highest first:
+ *  1. the upstream listing's own numbers (`upstreamCapabilities`)
+ *  2. an exact id override for a model the lane serves today
+ *  3. the family-wide pattern
+ *  4. the conservative default
+ *
+ * Where 1 and 2 disagree on a window the larger value wins: models.dev (which
+ * the listing mirrors) publishes a floor, and the lane has been observed
+ * accepting far more than it advertises — a ~1M-token prompt on
+ * `deepseek-v4.1-flash-free` against an advertised 200000. Taking the smaller
+ * figure would shrink a window the wire actually serves.
+ */
+export function capabilitiesFor(modelId, row) {
   const base = baseModelId(modelId)
+  const fromWire = upstreamCapabilities(row)
+  const local = localCapabilitiesFor(base)
+  if (fromWire === null) return local
+  const merged = { ...local, ...fromWire }
+  if (fromWire.contextWindow !== undefined && local.contextWindow !== undefined) {
+    merged.contextWindow = Math.max(fromWire.contextWindow, local.contextWindow)
+  }
+  if (fromWire.maxOutput !== undefined && local.maxOutput !== undefined) {
+    merged.maxOutput = Math.max(fromWire.maxOutput, local.maxOutput)
+  }
+  // A local menu is curated against the model's real behaviour (a rung the
+  // model refuses, an off-switch it ignores), so it outranks the listing's
+  // coarser ladder when one is declared.
+  if (Array.isArray(local.efforts) && local.efforts.length > 0) {
+    merged.efforts = [...local.efforts]
+    merged.effortDefault = local.effortDefault
+    if (local.effortPatch !== undefined) merged.effortPatch = local.effortPatch
+    else delete merged.effortPatch
+    if (local.effortOffPatch !== undefined) merged.effortOffPatch = local.effortOffPatch
+    else delete merged.effortOffPatch
+  }
+  return merged
+}
+
+/** The local table alone: an exact id override, else a family pattern, else the default. */
+function localCapabilitiesFor(base) {
   const override = FREE_ID_OVERRIDES[base]
   if (override !== undefined) return { reasoning: true, ...override }
   for (const entry of CAPABILITIES) if (entry.match.test(base)) {
@@ -242,12 +409,14 @@ export function buildCatalog(ids) {
   const seen = new Set()
   const entries = []
   for (const raw of ids) {
-    const id = String(raw ?? '').trim()
+    // A listing row carries the upstream's own numbers; a bare id does not.
+    const row = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw : null
+    const id = String((row === null ? raw : row.id) ?? '').trim()
     if (id === '' || !isFreeLane(id)) continue
     const base = baseModelId(id)
     if (seen.has(base)) continue
     seen.add(base)
-    const caps = capabilitiesFor(base)
+    const caps = capabilitiesFor(base, row)
     entries.push({
       id: base,
       name: displayModelName(base),
@@ -281,10 +450,18 @@ function number(value) {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.trunc(value) : undefined
 }
 
-/** Parse the gateway's `{"data":[{"id":…}]}` listing. */
-export function parseListing(payload) {
+/**
+ * Parse the gateway's `{"data":[{"id":…}]}` listing.
+ *
+ * Rows are kept whole by default rather than reduced to ids: `buildCatalog`
+ * reads each row's own `context_length`/`max_output`/`reasoning_efforts`, which
+ * is what keeps the picker's numbers in step with the roster without a release.
+ * Pass `{ idsOnly: true }` for a lane whose builder wants bare ids.
+ */
+export function parseListing(payload, { idsOnly = false } = {}) {
   const rows = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload?.models) ? payload.models : Array.isArray(payload) ? payload : []
-  return rows.map(row => (typeof row === 'string' ? row : row?.id)).filter(id => typeof id === 'string' && id !== '')
+  const kept = rows.filter(row => typeof row === 'string' ? row !== '' : typeof row?.id === 'string' && row.id !== '')
+  return idsOnly ? kept.map(row => (typeof row === 'string' ? row : row.id)) : kept
 }
 
 // ── the co-paid lane ──────────────────────────────────────────────────────────
@@ -602,7 +779,10 @@ export function buildEacCatalog(ids) {
   const seen = new Set()
   const entries = []
   for (const raw of ids) {
-    const id = String(raw ?? '').trim()
+    // Accept a bare id or a listing row. The row shape reaches here whenever a
+    // caller forgets `parseListing(..., { idsOnly: true })`; without this a
+    // row stringified to "[object Object]" and became the model's own name.
+    const id = String(typeof raw === 'object' && raw !== null ? raw.id ?? '' : raw ?? '').trim()
     if (id === '' || seen.has(id)) continue
     seen.add(id)
     const caps = eacCapabilitiesFor(id)
