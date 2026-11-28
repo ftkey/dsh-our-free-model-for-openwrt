@@ -4,7 +4,7 @@ import { foldForwardOutcome } from '../../../src/core/completion.js'
 import { recordTurn, recordUsage } from '../../../src/store.js'
 
 /** 一实例一 Worker，避免原渠道业务的模块单例串目录、串账号。 */
-export async function createChannelRuntime({ dataDir, logger = console, stats }) {
+export async function createChannelRuntime({ dataDir, logger = console, stats, onCatalogChanged = () => {} }) {
   const worker = new Worker(new URL('./worker.mjs', import.meta.url), {
     workerData: { dataDir },
     execArgv: process.execArgv.filter(arg => !arg.startsWith('--input-type')),
@@ -47,7 +47,9 @@ export async function createChannelRuntime({ dataDir, logger = console, stats })
     if (!entry) return
     if (message.type === 'chunk') {
       try { entry.onChunk?.(message.chunk) } catch (error) { entry.reject(error); worker.postMessage({ type: 'cancel', id: message.id }) }
-    } else if (message.type === 'error') entry.reject(Object.assign(new Error(message.message), { statusCode: message.statusCode }))
+    } else if (message.type === 'error') entry.reject(Object.assign(new Error(message.message), {
+      statusCode: message.statusCode, ...typeof message.code === 'string' ? { code: message.code } : {},
+    }))
     else entry.resolve(message.value)
   })
   function call(type, payload = {}, signal, onChunk, timeoutMs = 120000) {
@@ -70,7 +72,7 @@ export async function createChannelRuntime({ dataDir, logger = console, stats })
   }
   function refresh({ report = false } = {}) {
     if (!refreshing) {
-      refreshing = call('models').then(value => { rows = value.rows; return value }).finally(() => { refreshing = undefined })
+      refreshing = call('models').then(value => { rows = value.rows; onCatalogChanged(); return value }).finally(() => { refreshing = undefined })
     }
     return report ? refreshing : refreshing.then(value => value.rows)
   }
@@ -99,7 +101,7 @@ export async function createChannelRuntime({ dataDir, logger = console, stats })
         ok = outcome.error === undefined
         return outcome
       } finally {
-        if (!closed && stats) {
+        if (!closed && stats && request.recordUsage !== false) {
           const usage = outcome.usage
           recordUsage(stats, {
             model: request.model, at: Date.now(), input: usage?.prompt_tokens ?? 0, output: usage?.completion_tokens ?? 0,
@@ -108,7 +110,7 @@ export async function createChannelRuntime({ dataDir, logger = console, stats })
             decodeMs: first ? Date.now() - first : 0, decodeTokens: usage?.completion_tokens ?? 0,
             noUsage: usage === undefined, elapsedMs: Date.now() - started, aborted: request.signal?.aborted === true,
           })
-          recordTurn(stats, { model: request.model, ok, recovered: false })
+          if (request.recordTurn !== false) recordTurn(stats, { model: request.model, ok, recovered: false })
         }
       }
     },

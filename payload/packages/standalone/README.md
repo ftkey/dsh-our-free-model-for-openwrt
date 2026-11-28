@@ -1,5 +1,7 @@
 # Our Free Model 独立本地服务
 
+从源码启动、连接客户端与安全配置见[中文快速上手](../../docs/standalone-quickstart-zh.md)。
+
 这是独立产品的源码入口，不需要 DSH、Cordis、DSH profile 或宿主凭据库。
 已提供独立 HTTP 服务、网页管理、EAC 和十个账号渠道；独立安装制品尚未发布。
 本阶段从完整仓库运行，暂不能仅复制本目录或将它单独作为 npm 包安装。

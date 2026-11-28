@@ -1,6 +1,6 @@
 import { accessSync, constants, existsSync, mkdirSync, statSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { delimiter, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { PassThrough, Readable } from 'node:stream';
 import { DATA_DIR_NAME, resolveDshHome } from './store.js';
@@ -70,15 +70,25 @@ export function bunWorkerPath() {
   return workerPath;
 }
 
+/** Candidate discovery also works for GUI hosts whose inherited PATH is stale. */
+export function bunExecutableCandidates({ platform = process.platform, env = process.env, home = homedir() } = {}) {
+  const name = platform === 'win32' ? 'bun.exe' : 'bun';
+  return [env.OUR_FREE_MODEL_BUN,
+    env.BUN_INSTALL && join(env.BUN_INSTALL, 'bin', name),
+    join(home, '.bun', 'bin', name),
+    ...(env.PATH || '').split(platform === 'win32' ? ';' : ':').filter(Boolean).map(p => join(p.replace(/^"|"$/g, ''), name)),
+    ...(platform === 'darwin' ? ['/opt/homebrew/bin/bun', '/usr/local/bin/bun', '/opt/local/bin/bun'] : []),
+    ...(platform === 'win32' ? [
+      env.APPDATA && join(env.APPDATA, 'npm', 'node_modules', 'bun', 'bin', name),
+      join(home, 'scoop', 'apps', 'bun', 'current', name),
+      env.LOCALAPPDATA && join(env.LOCALAPPDATA, 'Microsoft', 'WinGet', 'Links', name),
+    ] : []),
+  ].filter(Boolean);
+}
+
 /** Locate a native executable, never a shell shim. No installation or download. */
 export function findBunExecutable() {
-  const name = process.platform === 'win32' ? 'bun.exe' : 'bun';
-  const candidates = [process.env.OUR_FREE_MODEL_BUN,
-    process.env.BUN_INSTALL && join(process.env.BUN_INSTALL, 'bin', name),
-    join(homedir(), '.bun', 'bin', name),
-    ...(process.env.PATH || '').split(delimiter).filter(Boolean).map(p => join(p.replace(/^"|"$/g, ''), name)),
-    process.env.APPDATA && join(process.env.APPDATA, 'npm', 'node_modules', 'bun', 'bin', name)];
-  for (const candidate of candidates.filter(Boolean)) {
+  for (const candidate of bunExecutableCandidates()) {
     try {
       const path = resolve(candidate);
       if (process.platform === 'win32' && !path.toLowerCase().endsWith('.exe')) continue;

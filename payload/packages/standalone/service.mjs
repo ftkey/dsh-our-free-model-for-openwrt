@@ -311,17 +311,26 @@ export async function startStandalone({
       sealedCredential: eac.credential,
       subscriptionRuntime: combinedSubscriptionRuntime,
       extensionRuntime: extensions,
+      accountChannelRuntime: {
+        catalog: () => channels?.publicModelRows() ?? [],
+        refresh: () => channels?.refresh(),
+        complete: (request, onChunk) => channels.complete(request, onChunk),
+      },
     })
-    channels = await createChannelRuntime({ dataDir, logger, stats: stores.stats })
+    channels = await createChannelRuntime({
+      dataDir, logger, stats: stores.stats,
+      onCatalogChanged: () => runtime?.syncAggregateCatalog(),
+    })
     const core = runtime
     const channelRows = () => channels.publicModelRows()
-    const completeCatalog = () => [...core.catalog, ...channelRows()]
+    core.syncAggregateCatalog()
+    const completeCatalog = () => [...core.catalog.filter(row => !row.accountChannel), ...channelRows()]
     const completeState = () => {
       const base = core.state()
       const catalog = completeCatalog()
-      // Account rows arrive after the core has merged its own lanes. Recompute
-      // account collisions over the core's pre-dedupe family evidence: never
-      // reconstruct that evidence from the deduped public catalog.
+      // Keep raw native rows and their identity-collision evidence for the
+      // existing direct API. Source-qualified bridge rows remain internal to
+      // the core, where combo dispatch can distinguish the native provider.
       const familyKeysById = new Map(base.visibility.familyKeysById)
       for (const row of channelRows()) familyKeysById.set(row.id, null)
       const visibility = buildModelVisibility(base.settings, familyKeysById)
@@ -343,13 +352,7 @@ export async function startStandalone({
       const membership = {}
       if (main.length > 0) membership[ROUTE_MAIN] = [...new Set(main.map(entry => entry.id))]
       if (region.length > 0) membership[ROUTE_REGION] = [...new Set(region.map(entry => entry.id))]
-      return {
-        ...base,
-        catalog,
-        visibility,
-        membership,
-        routableRows,
-      }
+      return { ...base, catalog, visibility, membership, routableRows }
     }
     const publicRows = () => {
       const snapshot = completeState()
@@ -364,7 +367,9 @@ export async function startStandalone({
       ...core,
       get egress() { return core.egress },
       get gatewayLatency() { return core.gatewayLatency },
-      get catalog() { return [...core.catalog, ...channelRows().map(row => ({ ...row, contextWindow: row.context_window, maxOutput: row.max_tokens }))] },
+      // Routing editors use source-qualified account refs, while state() and
+      // publicModelRows() retain the established native direct-model surface.
+      get catalog() { return core.catalog },
       state: completeState,
       publicModelRows: publicRows,
       complete: (request, onChunk) => channels.handles(request.model) ? channels.complete(request, onChunk) : core.complete(request, onChunk),
@@ -467,6 +472,12 @@ export async function startStandalone({
       product: PRODUCT, version: VERSION, dataDir,
       url: `http://${host === '::1' ? '[::1]' : host}:${listener.port}`,
       managementUrl: `http://${host === '::1' ? '[::1]' : host}:${listener.port}/${management.bootstrapFragment}`,
+      // Available only to an owner holding this in-process service object.
+      // HTTP clients still have exactly the existing authentication surface.
+      createManagementBootstrap() {
+        if (stopped) throw new Error('Standalone service is stopping')
+        return `http://${host === '::1' ? '[::1]' : host}:${listener.port}/${management.mintBootstrap()}`
+      },
       port: listener.port,
       keyFile: path.join(dataDir, 'settings.json'),
       runtime, channels, ready,

@@ -175,9 +175,9 @@ export function packageUsesHardLinks(pkgDir) {
   return false
 }
 
-/** Detect host rollback to a package version older than the code in memory. */
+/** Detect either store-linked bytes or a package-manager-owned installed copy. */
 export function installationIsManaged(pkgDir) {
-  return packageUsesHardLinks(pkgDir)
+  return packageUsesHardLinks(pkgDir) || isPackageManagerOwned(pkgDir)
 }
 
 /**
@@ -435,6 +435,16 @@ function sha256File(file) {
  */
 const STAGE_ATTEMPTS = 3
 const STAGE_BACKOFF_MS = 700
+const STAGE_MIN_BYTES_PER_SECOND = 64 * 1024
+const STAGE_MAX_TIMEOUT_MS = 10 * 60 * 1000
+
+/** Slow links need a size-dependent window, while stalled files stay bounded. */
+export function stageTimeoutFor(size, baseTimeoutMs = 30000) {
+  const base = Number.isFinite(baseTimeoutMs) && baseTimeoutMs > 0 ? baseTimeoutMs : 30000
+  const bytes = Number.isFinite(size) && size > 0 ? size : 0
+  return Math.min(STAGE_MAX_TIMEOUT_MS, Math.max(base, Math.ceil(bytes * 1000 / STAGE_MIN_BYTES_PER_SECOND)))
+}
+
 
 /** A CN egress to the CDN drops connections regularly, and a one-shot staging
  * turned one flaky second into a whole failed upgrade ("fetch failed" on a
@@ -513,12 +523,17 @@ export async function stageRelease({ manifest, manifestUrl, stageDir, fetchImpl 
       const file = manifest.files[cursor++]
       const target = path.join(stageDir, ...file.path.split('/'))
       const sources = stagedFileSources(manifestUrl, manifest, file.path)
+      const fileTimeoutMs = stageTimeoutFor(file.size, timeoutMs)
+      // Mirror fallback gets a fresh attempt, but cannot hold one file forever.
+      const deadline = Date.now() + Math.min(STAGE_MAX_TIMEOUT_MS, fileTimeoutMs * STAGE_ATTEMPTS * sources.length)
       let lastError
       for (let attempt = 1; attempt <= STAGE_ATTEMPTS; attempt += 1) {
         try {
           let body
           for (let mirror = 0; mirror < sources.length; mirror++) {
-            const signal = AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined
+            const remaining = deadline - Date.now()
+            if (remaining <= 0) throw new DOMException('file download deadline exceeded', 'TimeoutError')
+            const signal = AbortSignal.timeout(Math.min(fileTimeoutMs, remaining))
             try {
               const response = await fetchImpl(bustCdnCache(sources[mirror]), { redirect: 'error', signal })
               if (!response.ok) throw new Error(`HTTP ${response.status}`)
@@ -861,6 +876,22 @@ export function verifyInstalled(pkgDir, manifest) {
  * @returns {boolean}
  */
 export function isPackageManagerOwned(pkgDir, packageName = PACKAGE_NAME) {
+  // A real virtual-store copy is owned even when only a workspace importer
+  // depends on it, and even when pnpm uses copy rather than hard links. That
+  // is different from an unrelated importer beside a plain release install.
+  let physical
+  try { physical = fs.realpathSync(pkgDir) } catch { physical = path.resolve(pkgDir) }
+  const physicalProfile = profileDirOf(physical)
+  const segments = path.relative(physicalProfile, physical).split(path.sep)
+  if (segments[0] === 'node_modules' && segments[1] === '.pnpm'
+    && segments[2] && segments[3] === 'node_modules'
+    && segments.slice(4).join('/') === packageName
+    && (readTextFile(path.join(physicalProfile, 'node_modules', '.modules.yaml')) !== undefined
+      || readTextFile(path.join(physicalProfile, 'node_modules', '.pnpm', 'lock.yaml')) !== undefined)) {
+    try {
+      if (JSON.parse(fs.readFileSync(path.join(physical, 'package.json'), 'utf8')).name === packageName) return true
+    } catch { /* other ownership records may still prove the install */ }
+  }
   const profileDir = profileDirOf(pkgDir)
   const lockfile = readTextFile(path.join(profileDir, 'pnpm-lock.yaml'))
   if (lockfile !== undefined && lockfileDeclaresPackage(lockfile, packageName)) return true
@@ -877,9 +908,21 @@ export function isPackageManagerOwned(pkgDir, packageName = PACKAGE_NAME) {
  * writes its lockfile and .modules.yaml (issue #773).
  */
 export function profileDirOf(pkgDir) {
-  let dir = path.resolve(pkgDir)
-  while (dir !== path.dirname(dir) && path.basename(dir) !== 'node_modules') dir = path.dirname(dir)
-  return path.dirname(dir)
+  // The profile root is the parent of the *outermost* node_modules segment.
+  // Walking to the *first* node_modules on the way up stops inside pnpm's
+  // isolated store: an isolated install sits at
+  //   <profile>/node_modules/.pnpm/<name>@<version>/node_modules/<name>
+  // so the first match is the store's inner node_modules and the lockfile
+  // lookup then points at the store, never at the profile. The guard misses
+  // every isolated install that way (issue #343 review asked for the real
+  // linker matrix). Splitting on the separator keeps hoisted, scoped and
+  // nested-dependency layouts on the same profile root.
+  const resolved = path.resolve(pkgDir)
+  const parts = resolved.split(path.sep)
+  const outermost = parts.indexOf('node_modules')
+  if (outermost <= 0) return path.dirname(resolved)
+  const prefix = parts.slice(0, outermost).join(path.sep)
+  return prefix === path.parse(resolved).root.replace(/[\\/]$/, '') ? path.parse(resolved).root : prefix || path.sep
 }
 
 function readTextFile(file) {
@@ -887,9 +930,13 @@ function readTextFile(file) {
 }
 
 /** True when a pnpm lockfile records a `specifier` for `name` as a dependency.
- *  The importer's dependency entry is the only place the package name appears
- *  as a bare mapping key with a `specifier` child; pinned `packages:` and
- *  `snapshots:` keys carry `name@<specifier>` and cannot match.
+ *  Only the profile's own importer counts. A lockfile may also carry workspace
+ *  importers (`packages/app:`) whose dependencies are not installed into the
+ *  profile's node_modules; matching one of those would refuse an upgrade on an
+ *  install the profile never handed to pnpm (issue #343 review: cross-importer
+ *  matching is not byte ownership). A lockfile without an `importers:` section
+ *  (v6 style) keeps its root dependencies at the top level, so the whole text is
+ *  the root scope.
  *
  *  A `link:` specifier is deliberately not ownership: pnpm records no version
  *  and no integrity for a link, so it owns the junction and never the bytes.
@@ -899,14 +946,23 @@ function readTextFile(file) {
  *  pnpm can re-extract, and stays "owned". */
 export function lockfileDeclaresPackage(text, name) {
   const lines = text.split(/\r?\n/)
+  const importers = lines.findIndex(line => /^importers:\s*$/.test(line))
+  let scope = lines
+  if (importers !== -1) {
+    const rootStart = lines.findIndex((line, index) => index > importers && /^\s{2}(?:\.|'\.'|"\.")\s*:\s*(?:#.*)?$/.test(line))
+    if (rootStart === -1) return false
+    let end = rootStart + 1
+    while (end < lines.length && (lines[end].trim() === '' || /^\s{4,}/.test(lines[end]))) end += 1
+    scope = lines.slice(rootStart + 1, end)
+  }
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const entry = new RegExp(`^(\\s*)['"]?${escaped}['"]?\\s*:\\s*$`)
-  for (let index = 0; index < lines.length; index += 1) {
-    const match = entry.exec(lines[index])
+  for (let index = 0; index < scope.length; index += 1) {
+    const match = entry.exec(scope[index])
     if (match === null) continue
     const indent = match[1].length
-    for (let child = index + 1; child < lines.length; child += 1) {
-      const line = lines[child]
+    for (let child = index + 1; child < scope.length; child += 1) {
+      const line = scope[child]
       if (line.trim() === '') continue
       if (line.length - line.trimStart().length <= indent) break
       if (/^\s*"?specifier"?\s*:\s*['"]?link:/.test(line)) return false
@@ -916,9 +972,7 @@ export function lockfileDeclaresPackage(text, name) {
   return false
 }
 
-/** True when `node_modules/.modules.yaml` hoists `name@<specifier>`. pnpm
- *  writes this file as JSON on newer releases and as YAML on older ones, so
- *  the JSON spelling is parsed and the YAML spelling scanned by indentation. */
+/** True when .modules.yaml records this package in its hoisted locations. */
 function modulesHoistsPackage(text, name) {
   let parsed
   try { parsed = JSON.parse(text) } catch { parsed = undefined }
@@ -946,7 +1000,7 @@ function modulesHoistsPackage(text, name) {
 /** The refusal `apply` raises for a package-manager-owned copy. Carries
  *  `statusCode: 409`, the settings API's refusal convention for an install
  *  whose bytes another writer owns (see index.js `MANAGED_MESSAGE`). */
-const PACKAGE_MANAGER_REFUSAL = 'this installation is owned by pnpm; the in-app upgrade would be a second writer and can corrupt the copy — update it with pnpm (or reinstall from a release)'
+const PACKAGE_MANAGER_REFUSAL = 'this installation is owned by pnpm; the in-app upgrade would be a second writer and can corrupt the copy — update it with pnpm, or set distribution: managed in the profile so pnpm stays the only writer, or reinstall from a release; a relative link: dependency keeps in-app upgrades safe'
 
 /**
  * The upgrade lifecycle. The optional activate callback lets the Host include

@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { FreeModelAdapter, ROUTE_MAIN, ROUTE_REGION } from '../adapter.js'
+import { FreeModelAdapter, ROUTE_MAIN, ROUTE_REGION, accountChannelCatalog } from '../adapter.js'
 import { buildCatalog, buildEacCatalog, buildKiloCatalog, catalogFamilyKeys, isEacEntry, isKiloEntry, parseListing, reviveKiloCatalog } from '../catalog.js'
 import { buildAggregateCatalog, isAggregateEntry } from '../aggregate.js'
 import { buildComboCatalog, isComboEntry, normalizeCombos, pruneRotation } from '../combos.js'
@@ -98,21 +98,23 @@ export function createModelRuntime({
   onSealedUnavailable = () => {},
   onTopology = () => {},
   subscriptionRuntime,
+  accountChannelRuntime,
   extensionRuntime = null,
 }) {
   let catalog = materializeCatalog(catalogStore.get().entries ?? [])
-  // The persisted sealIds can carry ids written by an older build (a listing
-  // row stringified to "[object Object]" was stored before buildEacCatalog
-  // learned to unwrap rows). Drop anything that is not a plausible model id so
-  // a stale store cannot render a card named "EAC [object Object]"; the next
-  // successful listing rewrites the store anyway.
+  // Keep directory capability rows across restarts, while accepting the bare
+  // ids cached by older versions and rejecting their old stringification bug.
   let sealedCatalog = sealedCredential() === null ? [] : buildEacCatalog(
-    (catalogStore.get().sealIds ?? []).filter(id => typeof id === 'string' && id !== '' && !id.includes('[object ')),
+    (catalogStore.get().sealIds ?? []).filter(row => {
+      const id = typeof row === 'string' ? row : row?.id
+      return typeof id === 'string' && id !== '' && !id.includes('[object ')
+    }),
   )
   let kiloCatalog = reviveKiloCatalog(catalogStore.get().kiloRows)
   /** The aggregate lane: one row per enabled provider/model the user configured.
    *  Derived from settings, not from a listing, so it is rebuilt on every merge. */
   let aggregateCatalog = []
+  let accountEntries = accountChannelCatalog(accountChannelRuntime)
   let subscriptionEntries = []
   /** The virtual rows a combo contributes; rebuilt last, after every real lane. */
   let comboCatalog = []
@@ -148,7 +150,7 @@ export function createModelRuntime({
     const seen = new Set()
     const merged = []
     const candidates = []
-    for (const entry of [...freeCatalog, ...sealedCatalog, ...kiloCatalog, ...aggregateCatalog, ...extensionCatalog, ...subscriptionEntries]) {
+    for (const entry of [...freeCatalog, ...sealedCatalog, ...kiloCatalog, ...aggregateCatalog, ...extensionCatalog, ...subscriptionEntries, ...accountEntries]) {
       if (entry === null || entry === undefined || laneStandsDown(entry)) continue
       candidates.push(entry)
       if (seen.has(entry.id)) continue
@@ -170,6 +172,7 @@ export function createModelRuntime({
   const mergeCatalogs = () => {
     aggregateCatalog = buildAggregateCatalog(settings.get().aggregate ?? {})
     subscriptionEntries = subscriptionCatalog(subscriptionRuntime)
+    accountEntries = accountChannelCatalog(accountChannelRuntime)
     extensionCatalog = extensionRuntime === null ? [] : extensionRuntime.catalog ?? []
     rebuildCatalog()
   }
@@ -280,6 +283,7 @@ export function createModelRuntime({
     state,
     resolveImage,
     subscriptionRuntime,
+    accountChannelRuntime,
     sealedCredential,
     extensionRuntime,
     recordUsage: record => {
@@ -359,6 +363,11 @@ export function createModelRuntime({
     if (disposed) return { catalog, sources }
     sources.kilo = { ok: await refreshKiloRoster(), count: kiloCatalog.length }
     if (disposed) return { catalog, sources }
+    if (typeof accountChannelRuntime?.refresh === 'function') {
+      try { await accountChannelRuntime.refresh() }
+      catch (error) { logger.warn?.(`our-free-model: account catalog refresh failed (${error?.message ?? error})`) }
+    }
+    if (disposed) return { catalog, sources }
     mergeCatalogs()
     if (probe) await refreshAvailability(force)
     emitTopology()
@@ -373,19 +382,17 @@ export function createModelRuntime({
       return { ok: true, count: 0, skipped: true }
     }
     try {
-      // `buildEacCatalog` consumes bare ids, unlike `buildCatalog`, which reads
-      // each row's own capacities. Handing it whole rows stringifies every one
-      // of them to "[object Object]", which collapses the entire sealed roster
-      // into a single bogus entry (OR-011-core-bundle-source-drift).
-      const ids = parseListing(await fetchSealedListing(credential, { signal: lifetime.signal }), { idsOnly: true })
+      // Preserve per-model context/output/image metadata, including in the
+      // persisted cache; reducing this to ids loses capabilities after reboot.
+      const rows = parseListing(await fetchSealedListing(credential, { signal: lifetime.signal }))
       if (disposed) return
       // 独立应用授权变更时，旧账号正在返回的清单不得覆盖新状态。
       if (Object.hasOwn(credential, 'userToken') && sealedCredential()?.userToken !== credential.userToken) return { ok: false, count: sealedCatalog.length, skipped: true }
-      if (ids.length > 0) {
-        sealedCatalog = buildEacCatalog(ids)
-        catalogStore.update({ sealIds: sealedCatalog.map(entry => entry.id) })
+      if (rows.length > 0) {
+        sealedCatalog = buildEacCatalog(rows)
+        catalogStore.update({ sealIds: rows })
       }
-      return { ok: ids.length > 0, count: sealedCatalog.length }
+      return { ok: rows.length > 0, count: sealedCatalog.length }
     } catch (error) {
       if (disposed) return
       if (Object.hasOwn(credential, 'userToken') && sealedCredential()?.userToken !== credential.userToken) return { ok: false, count: sealedCatalog.length, skipped: true }

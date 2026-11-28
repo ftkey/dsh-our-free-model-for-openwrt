@@ -125,6 +125,7 @@ export function modelAvailability(id, snapshot, listed = false, { bunAvailable }
     availabilitySource: measured === manual && manual ? 'manual'
       : measured?.source === 'passive' ? 'passive'
         : listed ? 'listing' : 'probe',
+    ...(bunDetail && !transportReady ? { availabilityState: 'transport-unavailable' } : {}),
     availability: measured?.state ?? 'unknown',
     detail: transportReady ? '' : measured?.detail ?? '', probedAt: measured?.at ?? 0,
     ttftMs: measured?.ttftMs, latencyMs: measured?.latencyMs,

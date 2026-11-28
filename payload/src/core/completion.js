@@ -15,7 +15,10 @@ export function routableModelIds(snapshot) {
 export function publicModelRows(snapshot) {
   const membership = routableModelIds(snapshot)
   return snapshot.catalog
-    .filter(entry => membership.has(entry.id))
+    // Native account providers already advertise their own direct models. The
+    // source-qualified bridge ids are for combo members, avoiding duplicate
+    // picker groups and ambiguous ids shared with another lane.
+    .filter(entry => membership.has(entry.id) && entry.accountChannel !== true)
     .map(entry => {
       const efforts = effortsFor(entry, undefined, snapshot.settings.defaultMaxTokens)
       return {

@@ -160,11 +160,12 @@ export const CAPABILITIES = [
  *
  * ### Where this table departs from models.dev, and why
  *
- * - `contextWindow`: models.dev publishes `200000` for the `-free` ids, but
- *   the same upstream accepted a ~1M-token prompt on `deepseek-v4.1-flash-free`
- *   (1025229 prompt tokens, 200) and on `glm-5.3-flash-free` (900694, 200), so
- *   the published figure is a floor, not the wire's limit. The served window
- *   is used, matching what `deepseek-v4.1-flash` (the paid id) publishes.
+ * - `contextWindow`: the two free DeepSeek/GLM ids use the published safe
+ *   200000/32000 limits. Earlier isolated ~1M-token requests were accepted,
+ *   but real multi-turn sessions hit a much lower gateway ceiling (#744).
+ *   An accepted probe is not a continuity guarantee: the host must compact
+ *   before the serving lane rejects its next turn. Paid and other relays keep
+ *   their own capacities.
  * - `disabled` rung: offered only where the model's own `effort.values`
  *   includes `none`. GLM 5.3 Flash does not list `none`, and four samples at
  *   `none` still spent a median 552 reasoning tokens — an Off rung there would
@@ -175,9 +176,9 @@ export const CAPABILITIES = [
  *   measured override (models.dev lists `image`, but an image request 500s).
  */
 const FREE_ID_OVERRIDES = {
-  // models.dev: effort low|high|max; limit 200000/32000 (floor — see above).
+  // Free serving-lane safety limits, not the paid model's capacity (#744).
   'deepseek-v4.1-flash-free': {
-    vision: true, contextWindow: 1048576, maxOutput: 384000,
+    vision: true, contextWindow: 200000, maxOutput: 32000,
     efforts: ['disabled', 'low', 'high', 'max'], effortDefault: 'high',
     effortPatch: { reasoning_effort: '$effort' },
     effortOffPatch: { reasoning_effort: 'none' },
@@ -185,7 +186,7 @@ const FREE_ID_OVERRIDES = {
   // models.dev: effort low|high|max. No `none` in the set, and thinking does
   // not switch off in practice, so the menu starts at low.
   'glm-5.3-flash-free': {
-    vision: true, contextWindow: 1048576, maxOutput: 131072,
+    vision: true, contextWindow: 200000, maxOutput: 32000,
     efforts: ['low', 'high', 'max'], effortDefault: 'high',
     effortPatch: { reasoning_effort: '$effort' },
   },
@@ -309,7 +310,9 @@ export function upstreamCapabilities(row) {
   const efforts = Array.isArray(row.reasoning_efforts)
     ? row.reasoning_efforts.filter(level => typeof level === 'string' && level !== '').slice(0, 8)
     : []
-  if (contextWindow === undefined && maxOutput === undefined && efforts.length === 0) return null
+  const inputs = row?.modalities?.input ?? row?.metadata?.input_modalities
+  if (contextWindow === undefined && maxOutput === undefined && efforts.length === 0
+    && typeof row.reasoning !== 'boolean' && !Array.isArray(inputs)) return null
   const caps = {}
   if (contextWindow !== undefined) caps.contextWindow = contextWindow
   if (maxOutput !== undefined) caps.maxOutput = maxOutput
@@ -319,7 +322,6 @@ export function upstreamCapabilities(row) {
     // `none` is the wire's off-switch; the listing names it as an effort level.
     if (efforts.includes('none')) caps.effortOffPatch = { reasoning_effort: 'none' }
   }
-  const inputs = row?.modalities?.input ?? row?.metadata?.input_modalities
   if (Array.isArray(inputs)) caps.vision = inputs.includes('image')
   return caps
 }
@@ -333,11 +335,9 @@ export function upstreamCapabilities(row) {
  *  3. the family-wide pattern
  *  4. the conservative default
  *
- * Where 1 and 2 disagree on a window the larger value wins: models.dev (which
- * the listing mirrors) publishes a floor, and the lane has been observed
- * accepting far more than it advertises — a ~1M-token prompt on
- * `deepseek-v4.1-flash-free` against an advertised 200000. Taking the smaller
- * figure would shrink a window the wire actually serves.
+ * Most local capacities retain the existing measured-window policy. The two
+ * free DeepSeek/GLM ids have explicit continuity ceilings (#744): a larger
+ * listing value must not defer the host's compaction beyond their safe limit.
  */
 export function capabilitiesFor(modelId, row) {
   const base = baseModelId(modelId)
@@ -350,6 +350,10 @@ export function capabilitiesFor(modelId, row) {
   }
   if (fromWire.maxOutput !== undefined && local.maxOutput !== undefined) {
     merged.maxOutput = Math.max(fromWire.maxOutput, local.maxOutput)
+  }
+  if (base === 'deepseek-v4.1-flash-free' || base === 'glm-5.3-flash-free') {
+    merged.contextWindow = Math.min(local.contextWindow, fromWire.contextWindow ?? local.contextWindow)
+    merged.maxOutput = Math.min(local.maxOutput, fromWire.maxOutput ?? local.maxOutput)
   }
   // A local menu is curated against the model's real behaviour (a rung the
   // model refuses, an off-switch it ignores), so it outranks the listing's
@@ -365,8 +369,8 @@ export function capabilitiesFor(modelId, row) {
   return merged
 }
 
-/** The local table alone: an exact id override, else a family pattern, else the default. */
-function localCapabilitiesFor(base) {
+/** The local table's own match: an exact id override or a family pattern, else null. */
+function matchedLocalCapabilitiesFor(base) {
   const override = FREE_ID_OVERRIDES[base]
   if (override !== undefined) return { reasoning: true, ...override }
   for (const entry of CAPABILITIES) if (entry.match.test(base)) {
@@ -376,7 +380,13 @@ function localCapabilitiesFor(base) {
     if (!entry.vision && /(?:^|[-_])vl(?:$|[-_.])/i.test(base)) return { ...entry, vision: true }
     return entry
   }
-  return { vision: false, reasoning: true, contextWindow: 131072, maxOutput: 32768 }
+  return null
+}
+
+/** The local table alone: an exact id override, else a family pattern, else the default. */
+function localCapabilitiesFor(base) {
+  return matchedLocalCapabilitiesFor(base)
+    ?? { vision: false, reasoning: true, contextWindow: 131072, maxOutput: 32768 }
 }
 
 export function isRegionSensitive(modelId) {
@@ -492,6 +502,7 @@ const EAC_DISPLAY_NAMES = {
   'z-ai/glm-5.3': 'GLM 5.3',
   'z-ai/glm-5.3-flash': 'GLM 5.3 Flash',
   'mistralai/mistral-large-4-1t-a52b': 'Mistral Large 4 1T A52B',
+  'minimaxai/minimax-m3.1-flash': 'MiniMax M3.1 Flash',
   // AMD Radeon (developer.amd.com.cn). The lane namespaces its ids `amd/…`;
   // the card drops the prefix the same way it drops `org/` elsewhere.
   'amd/DeepSeek-V4.1-Flash': 'DeepSeek V4.1 Flash (AMD)',
@@ -538,6 +549,13 @@ const EAC_DISPLAY_NAMES = {
  * the relay still enforces its own limit on the wire.
  */
 const EAC_CAPABILITIES = [
+  {
+    // Relay-specific measurement submitted in #758 (2026-11-04): a 261679
+    // prompt-token request completed, while requests around 262K failed.
+    // Keep the relay ceiling rather than the vendor's larger model window.
+    match: /^minimaxai\/minimax-m3\.1-flash$/,
+    vision: false, reasoning: true, contextWindow: 262144, maxOutput: 32768,
+  },
   // NVIDIA Build — the ids the co-paid lane relays from integrate.api.nvidia.com.
   {
     match: /^mistralai\/mistral-large-4-1t-a52b/,
@@ -764,28 +782,58 @@ export function eacDisplayName(modelId) {
   return `${EAC_TAG} ${pretty}`
 }
 
-function eacCapabilitiesFor(modelId) {
-  for (const entry of EAC_CAPABILITIES) if (entry.match.test(modelId)) return entry
-  return { vision: false, reasoning: true, contextWindow: 131072, maxOutput: 32768 }
+/** `opencode/x` → `x`: the free-lane table is keyed by the model's own name. */
+function bareEacId(modelId) {
+  const value = baseModelId(modelId)
+  return value.includes('/') ? value.slice(value.lastIndexOf('/') + 1) : value
+}
+
+function eacCapabilitiesFor(modelId, row) {
+  const base = EAC_CAPABILITIES.find(entry => entry.match.test(modelId))
+    // The lane also relays the free lane's own ids (`opencode/*`, `mimo…`,
+    // `nemotron…`): the same model must not lose its window or vision just
+    // because it arrived through this channel (#825). The free-lane table is
+    // the curated baseline; only an id no table knows keeps the default.
+    ?? matchedLocalCapabilitiesFor(bareEacId(modelId))
+    ?? { vision: false, reasoning: true, contextWindow: 131072, maxOutput: 32768 }
+  // The gateway's own listing carries `context_length` / `max_output` /
+  // `modalities` for these ids (measured: it reports 1,048,576 for
+  // `mimo-v2.6-flash-free` while the bare default said 131,072 — #825). Its
+  // numbers win where they exist; a curated menu still outranks the listing's
+  // coarser ladder, exactly like `capabilitiesFor`.
+  const fromWire = upstreamCapabilities(row)
+  if (fromWire === null) return base
+  const merged = { ...base, ...fromWire }
+  if (modelId === 'minimaxai/minimax-m3.1-flash') {
+    merged.contextWindow = Math.min(base.contextWindow, fromWire.contextWindow ?? base.contextWindow)
+    merged.maxOutput = Math.min(base.maxOutput, fromWire.maxOutput ?? base.maxOutput)
+  }
+  if (Array.isArray(base.efforts) && base.efforts.length > 0) {
+    merged.efforts = [...base.efforts]
+    merged.effortDefault = base.effortDefault
+    if (base.effortPatch === undefined) delete merged.effortPatch
+    else merged.effortPatch = base.effortPatch
+    if (base.effortOffPatch === undefined) delete merged.effortOffPatch
+    else merged.effortOffPatch = base.effortOffPatch
+  }
+  return merged
 }
 
 /**
  * Build the co-paid lane's catalog rows from its raw listing ids.
  *
- * Every row is one chat-wire model that always thinks (the relay streams
- * reasoning whether or not the caller asks for it) and never sees images.
+ * Each row retains the serving lane's capacities and modality hints, with a
+ * local fallback for older id-only listings.
  */
 export function buildEacCatalog(ids) {
   const seen = new Set()
   const entries = []
   for (const raw of ids) {
-    // Accept a bare id or a listing row. The row shape reaches here whenever a
-    // caller forgets `parseListing(..., { idsOnly: true })`; without this a
-    // row stringified to "[object Object]" and became the model's own name.
+    // Accept old cached ids and the complete rows retained by current refreshes.
     const id = String(typeof raw === 'object' && raw !== null ? raw.id ?? '' : raw ?? '').trim()
     if (id === '' || seen.has(id)) continue
     seen.add(id)
-    const caps = eacCapabilitiesFor(id)
+    const caps = eacCapabilitiesFor(id, typeof raw === 'object' && raw !== null ? raw : null)
     entries.push({
       id,
       name: eacDisplayName(id),

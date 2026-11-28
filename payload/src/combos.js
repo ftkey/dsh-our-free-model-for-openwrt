@@ -22,10 +22,10 @@
  *   its load. The rotation cursor lives in memory: a restart losing it costs
  *   nothing but a different starting point.
  *
- * Capacities are the *intersection*, not the union. A chain that advertises
- * vision because its head supports it hands a fallback an image it cannot read;
- * a chain that advertises a 1M window because its head has one overruns a
- * fallback at 128K. The honest numbers are the ones every candidate can honour.
+ * Token capacities remain the intersection: a 1M head must not overrun a 128K
+ * fallback. Vision is available when at least one member supports it, because
+ * image turns filter explicit text-only candidates before dispatch. Advertising
+ * that route is also necessary to stop the host projecting images away first.
  *
  * @module src/combos.js
  */
@@ -140,7 +140,7 @@ export function buildComboCatalog(combos, catalog) {
     const entry = {
       id: combo.id, name: combo.name, channel: COMBO_CHANNEL,
       combo: members.map(member => member.id), strategy: combo.strategy, stickyLimit: combo.stickyLimit,
-      vision: members.every(member => member.vision === true),
+      vision: members.some(member => member.vision === true),
       reasoning: members.some(member => member.reasoning === true),
       contextWindow: Math.min(...members.map(member => number(member.contextWindow) ?? 131072)),
       maxOutput: Math.min(...members.map(member => number(member.maxOutput) ?? 32768)),

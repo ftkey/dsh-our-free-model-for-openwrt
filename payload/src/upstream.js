@@ -245,10 +245,10 @@ export function wireFor(modelId) {
  * @param {string} options.session - canonical session (all four session headers)
  * @param {boolean} [options.stream] - drives the default `accept`
  * @param {string} [options.accept] - explicit `accept` override
- * @param {string} [options.project] - caller project signal; **defaults to a
- *   fresh 40-hex id per request**, the quota-spread the reference mints when
- *   the client names no project (the old shared `global` bucket arrived
- *   pre-burned). A literal `global` or 40-hex commit passes through verbatim.
+ * @param {string} [options.project] - caller project signal; defaults to the
+ *   stable project identity derived from `session` in o2a/headers.js. Active
+ *   HTTP callers explicitly pass their canonical session as the project signal.
+ *   A literal `global` or 40-hex commit passes through verbatim.
  * @param {string} [options.childSession] - child session for
  *   `x-opencode-session-id`; defaults to `session`
  * @param {boolean} [options.anthropic] - add the Messages-lane beta header

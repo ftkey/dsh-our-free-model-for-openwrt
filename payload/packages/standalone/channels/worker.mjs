@@ -136,6 +136,7 @@ function harnessBody(request) {
   if (typeof request.maxTokens === 'number') body.max_tokens = request.maxTokens
   if (typeof request.temperature === 'number') body.temperature = request.temperature
   if (typeof request.reasoningEffort === 'string' && request.reasoningEffort !== '') body.reasoning_effort = request.reasoningEffort
+  if (request.toolChoice !== undefined) body.tool_choice = request.toolChoice
   return body
 }
 
@@ -157,7 +158,7 @@ async function complete(request, id, signal) {
   const convert = request.responses ? toResponsesGenerateOptions : toGenerateOptions
   const options = await convert(body, signal, effort, maxTokens, { bridge: attachments }, dropped => logger.warn(`忽略无法表达的工具类型：${dropped.type}`))
   options.model = model
-  options.sessionId = `standalone:${String(body.user ?? body.conversation ?? 'shared')}`
+  options.sessionId = request.sessionId ?? `standalone:${String(body.user ?? body.conversation ?? 'shared')}`
   for await (const chunk of ctx.llm.stream(markGatewayChannel(options))) {
     if (signal.aborted) throw new Error('请求已取消')
     send({ type: 'chunk', id, chunk })
@@ -184,7 +185,9 @@ parentPort.on('message', async message => {
     else if (type === 'complete') { await complete(message.request, id, controller.signal); send({ type: 'result', id }) }
     else throw new Error('未知渠道操作')
   } catch (error) {
-    send({ type: 'error', id, message: error.message, statusCode: error.statusCode ?? error.status })
+    const statusCode = error.failure?.status ?? error.statusCode ?? error.status
+    const code = error.failure?.code ?? (statusCode === 400 || statusCode === 422 ? 'CLIENT_ERROR' : error.code)
+    send({ type: 'error', id, message: error.message, statusCode, code })
   } finally { controllers.delete(id) }
 })
 

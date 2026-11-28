@@ -212,7 +212,7 @@ export const SETTINGS_INITIAL = {
    *  spawns a local mihomo that load-balances a Clash subscription; `mode:
    *  'client'` dials one http/https/socks5/socks5h URL directly. Off by
    *  default — requests go straight out until this is turned on. */
-  egress: { enabled: false, mode: 'subscription', url: '', mihomoPath: '' },
+  egress: { enabled: false, mode: 'subscription', url: '', mihomoPath: '', subscriptionIntervalSeconds: 86400 },
   /** Expose the absorbed channels' OpenAI gateway (the pack's loopback
    *  listener) to other machines under this plugin's own key. Off by default:
    *  a LAN listener is a door, and doors stay shut until asked for. */

@@ -17,6 +17,233 @@ The upstream MIT license is reproduced in LICENSE. Go dependency license and
 notice files below are copied verbatim from the modules linked into this build.
 The Go runtime license is included as well. Build inputs and hashes are in engine.json.
 
+## Local engine patch sources
+
+These local modifications are shipped here so an installed package can be audited
+without obtaining the development-only scripts directory. Their original byte hashes
+must match the patch records in engine.json.
+### 0001-agent-sync-skip-an-empty-catalog.patch
+
+Source: scripts/magpie-engine-patches/0001-agent-sync-skip-an-empty-catalog.patch in the OFM source repository.
+Applied on top of upstream revision 3bf298e70a5949c146d18a8f595ed89f5601b68f.
+Original UTF-8 bytes: 7654; SHA-256: 50acab57addbd3821a6a293f2a6be4f496b4fb4a8e118b3cfd224f29e83747aa.
+The quoted diff adds only a reversible "> " prefix to each line (">" for an empty line).
+Removing those prefixes recovers the original UTF-8 bytes, line endings and final newline.
+Extract to the current directory and print its SHA-256 (run from the package root):
+
+```sh
+node -e "const fs=require('node:fs');const s=fs.readFileSync('vendor/magpie/NOTICE.md','utf8');const m=s.match(/<!-- BEGIN OFM ENGINE PATCH 0001-agent-sync-skip-an-empty-catalog.patch -->\n> (\u0060+)diff\n([\s\S]*?)> \1\n<!-- END OFM ENGINE PATCH 0001-agent-sync-skip-an-empty-catalog.patch -->/);if(!m)throw Error('patch not found');const b=Buffer.from(m[2].replace(/^> ?/gm,''),'utf8');fs.writeFileSync('0001-agent-sync-skip-an-empty-catalog.patch',b);console.log(require('node:crypto').createHash('sha256').update(b).digest('hex'));"
+```
+
+<!-- BEGIN OFM ENGINE PATCH 0001-agent-sync-skip-an-empty-catalog.patch -->
+> ```diff
+> diff --git a/internal/agent/empty_catalog_sync_test.go b/internal/agent/empty_catalog_sync_test.go
+> new file mode 100644
+> index 0000000..fad89e7
+> --- /dev/null
+> +++ b/internal/agent/empty_catalog_sync_test.go
+> @@ -0,0 +1,145 @@
+> +package agent
+> +
+> +import (
+> +	"bytes"
+> +	"encoding/json"
+> +	"os"
+> +	"path/filepath"
+> +	"testing"
+> +
+> +	"github.com/yetone/magpie/internal/provider"
+> +)
+> +
+> +// A catalog with no models is a start-up or a vendor fetch that failed, not
+> +// a decision: a sync that ran on it would empty the agent's own list — the
+> +// way a second, provider-less magpie on the machine wiped a wired ZCode's
+> +// picker down to zero models and pointed it at its own gateway. The user
+> +// empties a list through Disconnect, never through a sync, so every sync
+> +// path skips an agent whose catalog is empty and writes again once the
+> +// catalog has models. Disconnect keeps its semantics: the field's Set is
+> +// what takes a provider out (TestZCode covers it).
+> +func TestSyncSkipsAnEmptyCatalog(t *testing.T) {
+> +	home := t.TempDir()
+> +	t.Setenv("HOME", home)
+> +	t.Setenv("USERPROFILE", home)
+> +	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+> +	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+> +	if err := provider.Save(provider.Provider{ID: "deepseek", Name: "DeepSeek", Chat: "https://api.deepseek.com/v1", Key: "k", Models: []string{"pro"}}); err != nil {
+> +		t.Fatal(err)
+> +	}
+> +	path := filepath.Join(home, ".zcode", "v2", "config.json")
+> +	rules := filepath.Join(home, ".zcode", "v2", "provider_config.json")
+> +	os.MkdirAll(filepath.Dir(path), 0o755)
+> +	os.WriteFile(path, []byte(`{"provider":{"builtin:bigmodel":{"name":"Bigmodel","kind":"anthropic","enabled":true}}}`), 0o644)
+> +	a := zcode(home)
+> +	f := a.Field("provider")
+> +	if err := f.Set("magpie"); err != nil {
+> +		t.Fatal(err)
+> +	}
+> +	os.WriteFile(rules, []byte(`{"schemaVersion":1,"config":{"providerConfigRules":{"providerRules":[{"providerId":"mine","config":{}}]}},"other":1}`), 0o600)
+> +	if err := f.Set("magpie"); err != nil {
+> +		t.Fatal(err)
+> +	}
+> +	if err := a.Sync(); err != nil {
+> +		t.Fatal(err)
+> +	}
+> +	// counts, in both files: magpie's models in config.json, its rule's
+> +	// personalModelIds in provider_config.json
+> +	wired := func() (int, int) {
+> +		var c struct {
+> +			Provider map[string]struct {
+> +				Models map[string]json.RawMessage `json:"models"`
+> +			} `json:"provider"`
+> +		}
+> +		b, err := os.ReadFile(path)
+> +		if err != nil {
+> +			t.Fatal(err)
+> +		}
+> +		if json.Unmarshal(b, &c) != nil {
+> +			t.Fatalf("config.json does not parse: %s", b)
+> +		}
+> +		var d struct {
+> +			Config struct {
+> +				ProviderConfigRules struct {
+> +					ProviderRules []struct {
+> +						ProviderID string `json:"providerId"`
+> +						Config     struct {
+> +							PersonalModelIds []string `json:"personalModelIds"`
+> +						} `json:"config"`
+> +					} `json:"providerRules"`
+> +				} `json:"providerConfigRules"`
+> +			} `json:"config"`
+> +		}
+> +		r, err := os.ReadFile(rules)
+> +		if err != nil {
+> +			t.Fatal(err)
+> +		}
+> +		if json.Unmarshal(r, &d) != nil {
+> +			t.Fatalf("provider_config.json does not parse: %s", r)
+> +		}
+> +		for _, rule := range d.Config.ProviderConfigRules.ProviderRules {
+> +			if rule.ProviderID == "magpie" {
+> +				return len(c.Provider["magpie"].Models), len(rule.Config.PersonalModelIds)
+> +			}
+> +		}
+> +		t.Fatalf("magpie's rule went: %s", r)
+> +		return 0, 0
+> +	}
+> +	if n, ids := wired(); n != 1 || ids != 1 {
+> +		t.Fatalf("the wire itself is empty: models=%d personalModelIds=%d", n, ids)
+> +	}
+> +
+> +	// the catalog drains (a provider kept, its vendor list gone — the state
+> +	// the wiped machine's second magpie was in), and both a direct Sync and
+> +	// the full SyncCatalog round leave both files byte for byte as they are
+> +	if err := provider.Save(provider.Provider{ID: "deepseek", Name: "DeepSeek", Chat: "https://api.deepseek.com/v1", Key: "k"}); err != nil {
+> +		t.Fatal(err)
+> +	}
+> +	if len(magpieModels("zcode")) != 0 {
+> +		t.Fatal("the catalog should be empty now")
+> +	}
+> +	configBytes, err := os.ReadFile(path)
+> +	if err != nil {
+> +		t.Fatal(err)
+> +	}
+> +	rulesBytes, err := os.ReadFile(rules)
+> +	if err != nil {
+> +		t.Fatal(err)
+> +	}
+> +	if err := a.Sync(); err != nil {
+> +		t.Fatal(err)
+> +	}
+> +	SyncCatalog()
+> +	afterConfig, err := os.ReadFile(path)
+> +	if err != nil {
+> +		t.Fatal(err)
+> +	}
+> +	afterRules, err := os.ReadFile(rules)
+> +	if err != nil {
+> +		t.Fatal(err)
+> +	}
+> +	if !bytes.Equal(configBytes, afterConfig) {
+> +		t.Fatalf("an empty catalog rewrote config.json:\nwas %s\nnow %s", configBytes, afterConfig)
+> +	}
+> +	if !bytes.Equal(rulesBytes, afterRules) {
+> +		t.Fatalf("an empty catalog rewrote provider_config.json:\nwas %s\nnow %s", rulesBytes, afterRules)
+> +	}
+> +	if n, ids := wired(); n != 1 || ids != 1 {
+> +		t.Fatalf("the picker was emptied: models=%d personalModelIds=%d", n, ids)
+> +	}
+> +
+> +	// the catalog back, and the same sync writes again — the skip never
+> +	// becomes a freeze
+> +	if err := provider.Save(provider.Provider{ID: "deepseek", Name: "DeepSeek", Chat: "https://api.deepseek.com/v1", Key: "k", Models: []string{"pro"}}); err != nil {
+> +		t.Fatal(err)
+> +	}
+> +	if err := provider.Save(provider.Provider{ID: "kimi", Name: "Kimi", Chat: "https://api.moonshot.cn/v1", Key: "k", Models: []string{"k2"}}); err != nil {
+> +		t.Fatal(err)
+> +	}
+> +	if err := a.Sync(); err != nil {
+> +		t.Fatal(err)
+> +	}
+> +	if n, ids := wired(); n != 2 || ids != 2 {
+> +		t.Fatalf("the models did not come back: models=%d personalModelIds=%d", n, ids)
+> +	}
+> +}
+> diff --git a/internal/agent/sync.go b/internal/agent/sync.go
+> index e6eff15..c9bc00b 100644
+> --- a/internal/agent/sync.go
+> +++ b/internal/agent/sync.go
+> @@ -55,6 +55,15 @@ func SyncCatalog() {
+>  			// a provider named magpie written by hand is the user's, its
+>  			// model list too (handWired)
+>  			if a.Sync != nil && !a.handWired() && (!a.ListOnly || a.Wired()) {
+> +				// a catalog with no models is a start-up or a vendor fetch
+> +				// that failed, not a decision: written as it stands, it
+> +				// would empty the agent's own list — a second, provider-less
+> +				// magpie on the machine must never empty ZCode's picker.
+> +				// The user empties a list through Disconnect, never here;
+> +				// the next round, once the catalog has models, writes.
+> +				if len(magpieModels(a.ID)) == 0 {
+> +					continue
+> +				}
+>  				_ = synced(a.Sync)
+>  			}
+>  			// a field magpie set to a found group's id before (autoref.go)
+> diff --git a/internal/agent/zcode.go b/internal/agent/zcode.go
+> index b34002f..bd3d55f 100644
+> --- a/internal/agent/zcode.go
+> +++ b/internal/agent/zcode.go
+> @@ -89,6 +89,14 @@ func zcode(home string) *Agent {
+>  			if !wired() {
+>  				return nil
+>  			}
+> +			// a sync that finds no models is a start-up or a vendor fetch
+> +			// that failed, not a decision (SyncCatalog skips one; this is
+> +			// the second fence for a caller that reaches Sync directly):
+> +			// both files stay as they stand. A list emptied through
+> +			// Disconnect comes back through the field's Set, never here.
+> +			if len(magpieModels("zcode")) == 0 {
+> +				return nil
+> +			}
+>  			// a ZCode that keeps its providers as rules, with magpie's taken
+>  			// out there, had it removed in ZCode: it isn't put back
+>  			if _, err := os.Stat(rules); err != nil || zcodeRuled(rules) {
+> @@ -382,6 +390,12 @@ func zcodeRuled(path string) bool {
+>  // key as ZCode wrote it. A sync (keep) leaves an address on another machine
+>  // as it found it (zcodeAddress).
+>  func zcodeRules(path string, on, keep bool) error {
+> +	// a sync that finds no models is a start-up or a vendor fetch that
+> +	// failed, not a decision (see zcode's Sync fence): the rules file
+> +	// stays as it stands. A first wire (keep=false) still writes.
+> +	if on && keep && len(magpieModels("zcode")) == 0 {
+> +		return nil
+> +	}
+>  	b, err := edit.Read(path)
+>  	if err != nil {
+>  		return err
+> ```
+<!-- END OFM ENGINE PATCH 0001-agent-sync-skip-an-empty-catalog.patch -->
+
+
 ## github.com/MoeForge/moego v0.1.0-alpha.1
 
 ### LICENSE

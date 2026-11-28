@@ -13,7 +13,7 @@ function routableModelIds(snapshot) {
 }
 function publicModelRows(snapshot) {
   const membership = routableModelIds(snapshot);
-  return snapshot.catalog.filter((entry) => membership.has(entry.id)).map((entry) => {
+  return snapshot.catalog.filter((entry) => membership.has(entry.id) && entry.accountChannel !== true).map((entry) => {
     const efforts = effortsFor(entry, void 0, snapshot.settings.defaultMaxTokens);
     return {
       id: entry.id,
@@ -188,7 +188,7 @@ function foldForwardOutcome(outcome, chunk) {
 // src/core/runtime.js
 import fs from "node:fs";
 import path from "node:path";
-import { FreeModelAdapter, ROUTE_MAIN as ROUTE_MAIN2, ROUTE_REGION as ROUTE_REGION2 } from "./adapter.js";
+import { FreeModelAdapter, ROUTE_MAIN as ROUTE_MAIN2, ROUTE_REGION as ROUTE_REGION2, accountChannelCatalog } from "./adapter.js";
 import { buildCatalog, buildEacCatalog, buildKiloCatalog, catalogFamilyKeys, isEacEntry, isKiloEntry, parseListing, reviveKiloCatalog } from "./catalog.js";
 import { buildAggregateCatalog, isAggregateEntry } from "./aggregate.js";
 import { buildComboCatalog, isComboEntry, normalizeCombos, pruneRotation } from "./combos.js";
@@ -261,14 +261,19 @@ function createModelRuntime({
   onTopology = () => {
   },
   subscriptionRuntime,
+  accountChannelRuntime,
   extensionRuntime = null
 }) {
   let catalog = materializeCatalog(catalogStore.get().entries ?? []);
   let sealedCatalog = sealedCredential() === null ? [] : buildEacCatalog(
-    (catalogStore.get().sealIds ?? []).filter((id) => typeof id === "string" && id !== "" && !id.includes("[object "))
+    (catalogStore.get().sealIds ?? []).filter((row) => {
+      const id = typeof row === "string" ? row : row?.id;
+      return typeof id === "string" && id !== "" && !id.includes("[object ");
+    })
   );
   let kiloCatalog = reviveKiloCatalog(catalogStore.get().kiloRows);
   let aggregateCatalog = [];
+  let accountEntries = accountChannelCatalog(accountChannelRuntime);
   let subscriptionEntries = [];
   let comboCatalog = [];
   let extensionCatalog = [];
@@ -285,7 +290,7 @@ function createModelRuntime({
     const seen = /* @__PURE__ */ new Set();
     const merged = [];
     const candidates = [];
-    for (const entry of [...freeCatalog, ...sealedCatalog, ...kiloCatalog, ...aggregateCatalog, ...extensionCatalog, ...subscriptionEntries]) {
+    for (const entry of [...freeCatalog, ...sealedCatalog, ...kiloCatalog, ...aggregateCatalog, ...extensionCatalog, ...subscriptionEntries, ...accountEntries]) {
       if (entry === null || entry === void 0 || laneStandsDown(entry)) continue;
       candidates.push(entry);
       if (seen.has(entry.id)) continue;
@@ -307,6 +312,7 @@ function createModelRuntime({
   const mergeCatalogs = () => {
     aggregateCatalog = buildAggregateCatalog(settings.get().aggregate ?? {});
     subscriptionEntries = subscriptionCatalog(subscriptionRuntime);
+    accountEntries = accountChannelCatalog(accountChannelRuntime);
     extensionCatalog = extensionRuntime === null ? [] : extensionRuntime.catalog ?? [];
     rebuildCatalog();
   };
@@ -395,6 +401,7 @@ function createModelRuntime({
     state,
     resolveImage,
     subscriptionRuntime,
+    accountChannelRuntime,
     sealedCredential,
     extensionRuntime,
     recordUsage: (record) => {
@@ -472,6 +479,14 @@ function createModelRuntime({
     if (disposed) return { catalog, sources };
     sources.kilo = { ok: await refreshKiloRoster(), count: kiloCatalog.length };
     if (disposed) return { catalog, sources };
+    if (typeof accountChannelRuntime?.refresh === "function") {
+      try {
+        await accountChannelRuntime.refresh();
+      } catch (error) {
+        logger.warn?.(`our-free-model: account catalog refresh failed (${error?.message ?? error})`);
+      }
+    }
+    if (disposed) return { catalog, sources };
     mergeCatalogs();
     if (probe) await refreshAvailability(force);
     emitTopology();
@@ -485,14 +500,14 @@ function createModelRuntime({
       return { ok: true, count: 0, skipped: true };
     }
     try {
-      const ids = parseListing(await fetchSealedListing(credential, { signal: lifetime.signal }), { idsOnly: true });
+      const rows = parseListing(await fetchSealedListing(credential, { signal: lifetime.signal }));
       if (disposed) return;
       if (Object.hasOwn(credential, "userToken") && sealedCredential()?.userToken !== credential.userToken) return { ok: false, count: sealedCatalog.length, skipped: true };
-      if (ids.length > 0) {
-        sealedCatalog = buildEacCatalog(ids);
-        catalogStore.update({ sealIds: sealedCatalog.map((entry) => entry.id) });
+      if (rows.length > 0) {
+        sealedCatalog = buildEacCatalog(rows);
+        catalogStore.update({ sealIds: rows });
       }
-      return { ok: ids.length > 0, count: sealedCatalog.length };
+      return { ok: rows.length > 0, count: sealedCatalog.length };
     } catch (error) {
       if (disposed) return;
       if (Object.hasOwn(credential, "userToken") && sealedCredential()?.userToken !== credential.userToken) return { ok: false, count: sealedCatalog.length, skipped: true };
